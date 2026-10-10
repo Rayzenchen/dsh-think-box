@@ -7,6 +7,13 @@
 
 import type { StreamSmoothingPreset } from './client/useSmoothStreamContent.ts'
 
+/**
+ * Package name this plugin is installed as under the profile. It is also the
+ * browser module id and the key the plugin-manager page uses for this bundle's
+ * own configuration slot, so those three must agree.
+ */
+export const STREAM_PACKAGE_ID = '@local/dsh-think-box'
+
 /** Legacy render-mode value retained so existing overlays remain valid. */
 export type StreamMode = 'typewriter' | 'teleprompter'
 

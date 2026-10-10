@@ -343,6 +343,7 @@ export function apply(ctx: ClientContext): void {
     }
   })
 
+
   const configured = function StreamConfiguredView(props: AssistantProps) {
     const preferences = useSyncExternalStore(
       settings.subscribe,

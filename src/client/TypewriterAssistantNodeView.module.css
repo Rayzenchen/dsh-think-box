@@ -94,34 +94,137 @@
  * body size, with `secondary` fallbacks that reproduce rc.6's hard `14px/24px`
  * when no Host axis is published.
  */
-.thinkSummary {
-  min-width: 0;
-  overflow: hidden;
+/*
+ * The live reasoning box sits inline on the Think row, to the right of the
+ * title, and stays there after the stream settles: the row never moves the box
+ * from below the title to beside it, and the frame never loses its border.
+ * While running it follows its tail; once settled it is read from its first
+ * line. `--dsh-thinking-inline-lines` keeps the two-line default tunable.
+ */
+/*
+ * Glide physics for this box come from the smoothing preset (see PRESET_CHASE
+ * in the component). Three custom properties override them when declared on the
+ * element: `--dsh-thinking-chase-tau-ms`, `--dsh-thinking-chase-max-px-per-sec`
+ * and `--dsh-thinking-chase-min-frame-ms`. They are deliberately NOT declared
+ * here: an unset property has to fall through to the preset, and 0 is a legal
+ * value (tau 0 snaps, speed 0 never follows).
+ */
+.thinkInline {
+  /* Streaming height, the vertical inset, and any extra slack. The settled
+   * state swaps the same variables instead of duplicating the box, so the
+   * collapse is a plain max-height transition.
+   *
+   * `span` is the geometry constant that was verified on screen, not a line
+   * count: do not "correct" it into `3` because the rendered box reads as three
+   * lines. The chrome is already part of the sum. */
+  --dsh-thinking-inline-span: 2;
+  --dsh-thinking-inline-pad-y: 4px;
+  --dsh-thinking-inline-extra: 8px;
+  box-sizing: border-box;
   flex: 1 1 auto;
-  color: var(--dsw-alias-label-tertiary);
-  font-size: var(--dsh-content-font-size-secondary, 14px);
-  line-height: calc(20px + var(--dsh-content-font-delta-secondary, 4px));
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.thinkSummary[data-follow-end] {
-  text-overflow: clip;
-}
-
-.thinkBody {
-  /* Indent under the title, which starts at leading (16 + delta) + gap 6. */
-  padding: 4px 0 4px calc(22px + var(--dsh-content-font-delta, 0px));
+  min-width: 0;
+  padding: var(--dsh-thinking-inline-pad-y) 8px;
   color: var(--dsw-alias-label-tertiary);
   font-size: var(--dsh-content-font-size-secondary, 14px);
   line-height: calc(20px + var(--dsh-content-font-delta-secondary, 4px));
   white-space: pre-wrap;
   word-break: break-word;
-  max-height: var(--dsh-thinking-max-height, 300px);
+  max-height: calc(
+    var(--dsh-thinking-inline-span) * (20px + var(--dsh-content-font-delta-secondary, 4px)) +
+      2 * var(--dsh-thinking-inline-pad-y) + 2px + var(--dsh-thinking-inline-extra)
+  );
   overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: thin;
+  /* Deliberately no `overscroll-behavior: contain`: reaching the end of the box
+   * must hand the gesture on to the conversation scroller rather than swallow
+   * it, which is what used to make the page feel stuck. */
+  scrollbar-width: none;
   scrollbar-color: var(--dsw-alias-border-l4, rgba(128, 128, 128, 0.4)) transparent;
+  background: var(--dsw-alias-bg-skeleton, rgba(0, 0, 0, 0.04));
+  border: 1px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.1));
+  border-radius: var(--dsh-thinking-radius, var(--dsw-radius-sm, 8px));
+  contain: layout;
+  transform: translateZ(0);
+  /* The settle flourish shrinks the box from the configured line count to one;
+   * height is the only property that animates, and only when it changes. */
+  transition: max-height 320ms var(--ds-ease-in-out, cubic-bezier(0.4, 0, 0.2, 1));
+}
+
+/* The thumb is hidden until the pointer is over the box. */
+.thinkBody::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.thinkBody:hover {
+  scrollbar-width: thin;
+}
+
+.thinkBody:hover::-webkit-scrollbar {
+  width: 6px;
+}
+
+.thinkInline::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.thinkInline:hover {
+  scrollbar-width: thin;
+}
+
+.thinkInline:hover::-webkit-scrollbar {
+  width: 6px;
+}
+
+/*
+ * Settled: one line, and only the inset that line needs. This is the height the
+ * box keeps until the next stream starts, including for boxes that mount after
+ * a transcript restore.
+ */
+.thinkInline[data-settled] {
+  --dsh-thinking-inline-span: 1;
+  --dsh-thinking-inline-pad-y: 2px;
+  --dsh-thinking-inline-extra: 0px;
+}
+
+/*
+ * The disclosure row reserves exactly one 24px line for the Think chrome. With
+ * the inline box riding on it the row grows to the box instead, while the
+ * leading icon and the title stay centred.
+ */
+.disclosureRow.thinkRowInline {
+  height: auto;
+  min-height: calc(24px + var(--dsh-content-font-delta, 0px));
+  padding-block: 2px;
+}
+
+.thinkBody {
+  /* Indent under the title, which starts at leading (16 + delta) + gap 6. */
+  box-sizing: border-box;
+  padding: 4px 8px 4px calc(22px + var(--dsh-content-font-delta, 0px));
+  color: var(--dsw-alias-label-tertiary);
+  font-size: var(--dsh-content-font-size-secondary, 14px);
+  line-height: calc(20px + var(--dsh-content-font-delta-secondary, 4px));
+  white-space: pre-wrap;
+  word-break: break-word;
+  /*
+   * The opened body is the whole chain of thought: up to 20 lines by default,
+   * and exactly its content height when the reasoning is shorter, because a
+   * max-height never stretches a short box. `--dsh-thinking-max-height` still
+   * overrides the whole expression.
+   */
+  max-height: var(
+    --dsh-thinking-max-height,
+    calc(var(--dsh-thinking-expanded-lines, 18) * (20px + var(--dsh-content-font-delta-secondary, 4px)) + 10px)
+  );
+  overflow-y: auto;
+  /* Same rule as the inline box: the thumb stays hidden until the pointer is
+   * over the box, so the reading surface is not permanently marked by a bar. */
+  scrollbar-width: none;
+  scrollbar-color: var(--dsw-alias-border-l4, rgba(128, 128, 128, 0.4)) transparent;
+  background: var(--dsw-alias-bg-skeleton, rgba(0, 0, 0, 0.04));
+  border: 1px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.1));
+  border-radius: var(--dsh-thinking-radius, var(--dsw-radius-sm, 8px));
   contain: layout;
   transform: translateZ(0);
   will-change: scroll-position;

@@ -1,7 +1,11 @@
 {
-  "name": "dsh-smooth-stream",
-  "version": "0.7.0",
-  "description": "Fluid streaming rendering and silky scrolling for DeepSeek Harness replies, including Markdown, code blocks, tables, and tool results.",
+  "name": "@local/dsh-think-box",
+  "version": "1.0.0",
+  "description": "本地定制版思考显示框：常驻「思考」右侧的多行推理窗，点击展开全文，缓动追赶流式输出。",
+  "meta": {
+    "title": "思维链显示增强",
+    "description": "把模型的思考过程变成一个稳定的展示框：常驻「思考」右侧、多行实时显示、缓动跟随流式输出；点击「思考」可在下方展开全文（最多 18 行），结束后自动回到开头并收缩为一行。"
+  },
   "license": "MIT",
   "type": "module",
   "packageManager": "pnpm@11.23.0",
@@ -49,7 +53,8 @@
       "default": "./lib/client.js"
     },
     "./src/*": "./src/*",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
   },
   "files": [
     "lib/**/*.js",
@@ -60,7 +65,8 @@
     "cordis.patch.yml",
     "README.md",
     "README.en.md",
-    "LICENSE"
+    "LICENSE",
+    "locale"
   ],
   "dsh": {
     "bundle": {
@@ -83,16 +89,9 @@
     "build": "tsdown",
     "dev:watch": "tsdown --watch",
     "host:sync": "pnpm build && node scripts/check-lib-fresh.mjs",
-    "build:repro": "esbuild repro/main.tsx --bundle --format=esm --platform=browser --loader:.css=local-css --alias:@deepseek-ai/dsh-client-runtime=./repro/shims/client-runtime.ts --alias:@deepseek-ai/dsh-client-runtime/client=./repro/shims/client-runtime.ts --alias:@deepseek-ai/dsh-client-ui-primitives=./repro/shims/primitives.tsx --outfile=repro/bundle.js",
-    "build:stress": "esbuild repro/stress-120fps.tsx --bundle --format=esm --platform=browser --loader:.css=local-css --alias:@deepseek-ai/dsh-client-runtime=./repro/shims/client-runtime.ts --alias:@deepseek-ai/dsh-client-runtime/client=./repro/shims/client-runtime.ts --alias:@deepseek-ai/dsh-client-ui-primitives=./repro/shims/primitives.tsx --outfile=repro/stress-120fps.bundle.js",
-    "stress:120fps": "node scripts/stress-test-120fps.mjs",
-    "test:rebound": "node scripts/verify-y-rebound.mjs",
     "prepare": "tsdown",
     "test": "vitest run",
-    "typecheck": "tsc -p tsconfig.json --pretty false",
-    "test:smooth": "node scripts/verify-y-rebound.mjs && node scripts/probe-tailbob.mjs 1200 20 && node scripts/verify-overflow.mjs --runs 3",
-    "probe:overlap": "node scripts/probe-overlap.mjs",
-    "probe:stability": "node scripts/verify-follow-stability.mjs"
+    "typecheck": "tsc -p tsconfig.json --pretty false"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",

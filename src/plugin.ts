@@ -24,7 +24,7 @@ import {
 } from './settings.ts'
 
 /** Display name shown by the Host loader while the plugin is mounted. */
-export const name = 'dsh-smooth-stream'
+export const name = '@local/dsh-think-box'
 
 /**
  * Plugin configuration accepted from the overlay's `config` section. Cordis
@@ -93,7 +93,7 @@ export const StreamSettingsSchema: Schema<StreamSettings> = Schema.object({
  */
 export function apply(ctx: Context, config: Config): void {
   console.log(
-    `[dsh-smooth-stream] plugin loaded! mode=${config.mode} preset=${config.preset} `
+    `[dsh-think-box] plugin loaded! mode=${config.mode} preset=${config.preset} `
     + `seed=${config.revealCharsPerSec}cps scroll=${config.scrollSpeedPxPerSec}px/s `
     + `maxScroll=${config.maxScrollSpeedPxPerSec}px/s`,
   )

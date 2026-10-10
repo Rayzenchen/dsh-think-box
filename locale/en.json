@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Reasoning display enhancement",
+    "description": "Turns the model's reasoning into one steady display box: a multi-line live view beside the Think row that glides after the stream, a click-to-open body below it (18 lines), and a settle flourish that returns to the first line and collapses to a single row."
+  }
+}

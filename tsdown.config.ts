@@ -4,7 +4,7 @@ import { basename, dirname, resolve as resolvePath } from 'node:path'
 import { defineConfig, type UserConfig } from 'tsdown'
 import { transform } from 'lightningcss'
 
-const PACKAGE_ID = 'dsh-smooth-stream'
+const PACKAGE_ID = '@local/dsh-think-box'
 const CSS_VIRTUAL_PREFIX = '\0dsh-css:'
 const CSS_VIRTUAL_SUFFIX = '.mjs'
 

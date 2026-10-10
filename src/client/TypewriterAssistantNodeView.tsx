@@ -426,15 +426,107 @@ function FoldableReasoning({
   )
 }
 
-function firstLine(text: string): string {
-  const newline = text.indexOf('\n')
-  return newline === -1 ? text : text.slice(0, newline)
+/**
+ * The box is a display pool fed by a bursty producer.
+ *
+ * Text does not arrive at a steady rate: chunks land in bursts, and the reveal
+ * engine deliberately speeds up (by design, up to several hundred characters a
+ * second) whenever its own queue backs up. Driving the scroll straight at the
+ * DOM bottom therefore inherits every one of those bursts - the box travels at
+ * whatever rate the producer happens to be running at, stalls when it pauses,
+ * and lurches when it finally flushes.
+ *
+ * Instead the scroll position is a cursor advanced at a SMOOTHED rate: the pool
+ * drains at the running average of what came in. Bursts are absorbed as backlog
+ * behind the cursor and the motion stays one steady glide from the first line
+ * to the last. When the producer stops, the cursor keeps draining at exactly
+ * the speed already on screen, so the landing needs no separate animation at
+ * all - it is just the belt finishing its work.
+ */
+interface BeltTracker {
+  el: HTMLElement | null
+  /** Scroll position the belt has advanced to, in px. */
+  cursor: number
+  /** Smoothed producer rate, px/s. */
+  rate: number
+  /** scrollHeight at the previous sample. */
+  height: number
 }
 
-function latestLine(text: string): string {
-  const visible = text.trimEnd()
-  const newline = visible.lastIndexOf('\n')
-  return newline === -1 ? visible : visible.slice(newline + 1)
+/** How much of a burst survives into the motion: the rate smoother's time constant. */
+const BELT_TAU_MS = 400
+/** The belt never quite stops while a stream is live, and never rips. */
+const BELT_MIN_PX_PER_SEC = 90
+const BELT_MAX_PX_PER_SEC = 800
+/** Rate a box starts from, before it has measured anything. */
+const BELT_START_PX_PER_SEC = 150
+
+const emptyBelt = (): BeltTracker => ({
+  el: null,
+  cursor: 0,
+  rate: BELT_START_PX_PER_SEC,
+  height: 0,
+})
+
+/**
+ * Re-anchor the belt to where the box actually is, so following can resume
+ * without a jump after the reader took the position over.
+ * @param el - the scrolling box.
+ * @param belt - the tracker to re-anchor.
+ */
+function beltSync(el: HTMLElement, belt: BeltTracker): void {
+  belt.el = el
+  belt.cursor = el.scrollTop
+  belt.height = el.scrollHeight
+  belt.rate = BELT_START_PX_PER_SEC
+}
+
+/**
+ * Advance the belt one frame: smooth the producer's rate, then drain at it.
+ * @param el - the scrolling box.
+ * @param belt - per-box tracker.
+ * @param dtMs - frame time in ms.
+ * @param drain - true once the producer stopped. The rate is then held instead
+ *   of smoothed, so the landing continues at the speed already on screen.
+ * @returns the scrollTop to apply.
+ */
+function beltStep(el: HTMLElement, belt: BeltTracker, dtMs: number, drain: boolean): number {
+  const dt = Math.min(100, Math.max(1, dtMs))
+  if (belt.el !== el) {
+    // A different element means the reader toggled the disclosure. Both shapes
+    // show the same live chain, so the new box starts where the stream is - at
+    // the live bottom - rather than at its own initial scrollTop of zero, which
+    // is what made the content creep down from the top after every toggle.
+    belt.el = el
+    belt.cursor = Math.max(0, el.scrollHeight - el.clientHeight)
+    belt.height = el.scrollHeight
+  }
+  if (!drain) {
+    const produced = ((el.scrollHeight - belt.height) / dt) * 1000
+    const k = 1 - Math.exp(-dt / BELT_TAU_MS)
+    belt.rate += (produced - belt.rate) * k
+    belt.rate = Math.min(BELT_MAX_PX_PER_SEC, Math.max(BELT_MIN_PX_PER_SEC, belt.rate))
+  }
+  belt.height = el.scrollHeight
+  const bottom = Math.max(0, el.scrollHeight - el.clientHeight)
+  belt.cursor = Math.max(0, Math.min(belt.cursor + (belt.rate * dt) / 1000, bottom))
+  return belt.cursor
+}
+
+/**
+ * Nearest scrollable ancestor: the port a disclosure toggle has to compensate
+ * its layout shift in.
+ * @param el - element to start walking up from.
+ * @returns the scrolling ancestor, or null when nothing up the tree scrolls.
+ */
+function scrollParentOf(el: HTMLElement): HTMLElement | null {
+  let node = el.parentElement
+  while (node !== null) {
+    const overflow = getComputedStyle(node).overflowY
+    if (overflow === 'auto' || overflow === 'scroll') return node
+    node = node.parentElement
+  }
+  return null
 }
 
 /**
@@ -449,6 +541,7 @@ function latestLine(text: string): string {
 function AnimatedReasoning({
   text,
   running,
+  turnStreaming,
   preset,
   thinkAutoExpand,
   motionReduced,
@@ -456,11 +549,16 @@ function AnimatedReasoning({
   shouldHoldBack,
   followSpeedCpsRef,
   followRevealScaleRef,
-  snapAutoCollapse,
   t,
 }: {
   text: string
   running: boolean
+  /**
+   * Whether the assistant node is still streaming at all. A short reasoning
+   * block is often never the tail of the step, so its own `running` flag never
+   * turns on; the turn is the only reliable "it is over" signal for it.
+   */
+  turnStreaming: boolean
   preset: StreamSmoothingPreset
   thinkAutoExpand: boolean
   motionReduced: boolean
@@ -468,19 +566,37 @@ function AnimatedReasoning({
   shouldHoldBack: () => boolean
   followSpeedCpsRef?: { current: number } | undefined
   followRevealScaleRef?: { current: number } | undefined
-  /** 0.1.x single rows snap the auto-close and let their follower absorb the step; on 0.2.x the collapse lands exactly at the ownership handoff, so it must glide. */
-  snapAutoCollapse: boolean
   t: AssistantProps['t']
 }) {
   const reduced = motionReduced
-  const [expanded, setExpanded] = useState(running && thinkAutoExpand)
-  const [autoClosed, setAutoClosed] = useState(false)
-  const summaryRef = useRef<HTMLSpanElement>(null)
+  // A box is open while its block streams, and also while the turn is still
+  // running even if this particular block never held the tail: a short chain of
+  // thought finishes inside one commit and would otherwise render collapsed
+  // from the start, with no flourish to watch.
+  const [settled, setSettled] = useState(!running && !turnStreaming)
+  const wasRunningRef = useRef(running)
+  // One flourish per stream. Two end signals can arrive for the same chain -
+  // this block leaving the tail, then the turn itself ending a moment later -
+  // and without this the whole sequence replays from the collapsed state.
+  //
+  // It is set only once the flourish COMPLETES: a run cancelled by a dependency
+  // change must stay retryable, otherwise a single cancelled animation leaves
+  // the box open at the streaming height until the component remounts.
+  const flourishedRef = useRef(false)
+  // Whether this block was ever live in this mount. Restored history is not, and
+  // must not replay the flourish.
+  const liveRef = useRef(running || turnStreaming)
+  if (running || turnStreaming) liveRef.current = true
+  // The row's inline box carries the live reasoning, so nothing auto-expands:
+  // the disclosure body below the row opens only from a click on the row.
+  const [expanded, setExpanded] = useState(false)
+  const inlineRef = useRef<HTMLDivElement>(null)
   const fadeRootRef = useRef<HTMLDivElement>(null)
-  // The custom thinking auto-scroll drives the SAME node as the logarithmic
-  // fade, so it reuses that ref object rather than installing a second one
-  // (a callback ref would re-attach on every render).
-  const thinkBodyRef = fadeRootRef
+  // The fade and the custom auto-scroll drive whichever box is on screen: the
+  // inline row box while collapsed, the disclosure body while open. Both refs
+  // are stable, so the fade controller moves between them on a toggle.
+  const activeRef = expanded ? fadeRootRef : inlineRef
+  const beltRef = useRef<BeltTracker>(emptyBelt())
   const localFadeSpeedRef = useRef(35)
   const fadeSpeedRef = followSpeedCpsRef ?? localFadeSpeedRef
   const userScrolledRef = useRef(false)
@@ -489,7 +605,7 @@ function AnimatedReasoning({
   // render so the queued frame can re-read it: a stop or a collapse landing
   // between scheduling and the frame must not move the viewport.
   const followActiveRef = useRef(false)
-  followActiveRef.current = running && expanded
+  followActiveRef.current = running && thinkAutoExpand
   const commitAnchorRef = useRef<HTMLDivElement>(null)
   // The running鈫抐alse flip is the AUTO-close: it collapses instantly and the
   // follower's settle spring absorbs the height step. A later manual toggle
@@ -503,16 +619,13 @@ function AnimatedReasoning({
     onRevealCommit: () => { notifyFollowCommit(commitAnchorRef.current) },
   })
   const shown = running && !reduced ? displayed : text
-  const summary = running ? latestLine(shown) : firstLine(text)
-  useLogarithmicFade(fadeRootRef, logarithmicFade && !reduced && expanded, running, fadeSpeedRef)
+  // The fade and the settle lag belong to whichever box the reader sees.
+  useLogarithmicFade(activeRef, logarithmicFade && !reduced, running, fadeSpeedRef)
 
   useLayoutEffect(() => {
-    // Only the running state owns disclosure while auto-expand is on; with it
-    // off, a manual toggle is never wrestled back by the stream.
-    if (thinkAutoExpand) {
-      setExpanded(running)
-      setAutoClosed(!running)
-    }
+    // Nothing expands the body on its own any more: the live reasoning streams
+    // through the inline row box, and only a row click opens the full body, so
+    // a manual toggle is never wrestled back by the stream.
     if (running) {
       userScrolledRef.current = false
     }
@@ -520,29 +633,46 @@ function AnimatedReasoning({
     // correction in the SAME task, before the grown-but-uncompensated frame
     // can reach a paint.
     notifyFollowCommit(commitAnchorRef.current)
-  }, [running, thinkAutoExpand])
+  }, [running])
 
   useEffect(() => {
     // Only the live stream owns the reading position. A settled block is
     // something to read from the top, so expanding a finished reasoning card
     // must not scroll it 鈥?that would make its first lines unreachable.
-    if (!running || !expanded || userScrolledRef.current) return
-    const el = thinkBodyRef.current
+    // The takeover flag is deliberately NOT part of this guard. It is a
+    // per-frame condition (the loop re-anchors while the reader owns the
+    // position), and testing it here meant a toggle that arrived while the flag
+    // was still set never started a loop at all - so handing the position back
+    // had nothing left to resume it.
+    if (!running || !thinkAutoExpand) return
+    const el = activeRef.current
     if (el === null) return
-    if (rafIdRef.current === 0) {
-      rafIdRef.current = requestAnimationFrame(() => {
-        rafIdRef.current = 0
-        // Re-checked at frame time: the stream may have stopped, the block may
-        // have collapsed, or the user may have scrolled since scheduling. A
-        // queued frame never steals the position back.
-        if (!followActiveRef.current || userScrolledRef.current || el === null) return
-        const delta = el.scrollHeight - el.scrollTop - el.clientHeight
-        if (delta > 2) {
-          el.scrollTop = Number.MAX_SAFE_INTEGER
-        }
-      })
+    // A continuous glide loop rather than a write per revealed character: the
+    // box keeps travelling between text updates, which is what makes the motion
+    // read as scrolling instead of as an instant re-layout.
+    let last = 0
+    const glide = (ts: number) => {
+      rafIdRef.current = requestAnimationFrame(glide)
+      const dt = last === 0 ? 16.667 : ts - last
+      last = ts
+      // Re-checked at frame time: the stream may have stopped, a toggle may
+      // have swapped the box, or the reader may have taken the position back.
+      if (!followActiveRef.current) return
+      if (userScrolledRef.current) {
+        // The reader owns the position: re-anchor so resuming never jumps.
+        beltSync(el, beltRef.current)
+        return
+      }
+      el.scrollTop = beltStep(el, beltRef.current, dt, false)
     }
-  }, [running, expanded, shown])
+    rafIdRef.current = requestAnimationFrame(glide)
+    return () => {
+      if (rafIdRef.current !== 0) {
+        cancelAnimationFrame(rafIdRef.current)
+        rafIdRef.current = 0
+      }
+    }
+  }, [running, expanded, thinkAutoExpand, preset, logarithmicFade, reduced])
 
   useEffect(() => {
     return () => {
@@ -554,7 +684,14 @@ function AnimatedReasoning({
   }, [])
 
   useEffect(() => {
-    const el = thinkBodyRef.current
+    // Re-attached whenever the visible box changes: taking the reading position
+    // over is a per-scroller contract, and a toggle swaps which scroller that is.
+    // The previous box's takeover must not carry across either, so a toggle
+    // always hands the position back to the stream: collapsing a body the reader
+    // had scrolled back up resumes following at the live bottom instead of
+    // staying parked where the old box was left.
+    userScrolledRef.current = false
+    const el = activeRef.current
     if (el === null) return
     let isPointerDown = false
     const onWheel = (e: WheelEvent) => {
@@ -592,13 +729,125 @@ function AnimatedReasoning({
       window.removeEventListener('pointercancel', onPointerUp)
       el.removeEventListener('scroll', onScroll)
     }
-  }, [])
+  }, [expanded])
 
   useEffect(() => {
-    const element = summaryRef.current
-    if (element === null) return
-    element.scrollLeft = running ? element.scrollWidth - element.clientWidth : 0
-  }, [running, summary])
+    // A new stream re-anchors the belt wherever the box currently sits.
+    if (!running) return
+    const el = inlineRef.current
+    if (el !== null) beltSync(el, beltRef.current)
+  }, [running])
+
+  // Finishing flourish. When the model stops thinking the box lands on its last
+  // line, holds it for a beat so the end can be read, glides back up to the
+  // first line, and only then shrinks to a single line. Restoring a transcript
+  // must not replay this, so it fires on a real running -> settled transition
+  // and never on mount.
+  useEffect(() => {
+    const wasRunning = wasRunningRef.current
+    wasRunningRef.current = running
+    if (running) {
+      setSettled(false)
+      flourishedRef.current = false
+      return
+    }
+    if (flourishedRef.current) return
+    // This block stopped being the streaming tail: that is the end of its own
+    // chain of thought, and the flourish belongs there - deferring it to the end
+    // of the turn would freeze the box on a stale line while the rest of the
+    // reply streams past. A chain short enough never to hold the tail has no
+    // such moment, so while the turn is still running there is nothing to do for
+    // it; the turn boundary triggers it instead. Once the turn is over this
+    // condition is satisfied for every live block, which is also what retries a
+    // flourish that a dependency change cancelled halfway through.
+    const blockEnded = wasRunning
+    if (turnStreaming && !blockEnded) return
+    // Never live in this mount: a restored transcript block, already settled.
+    if (!liveRef.current) return
+    const el = inlineRef.current
+    if (el === null || expanded) {
+      // Already collapsed, or the body is open: skip straight to the end state.
+      flourishedRef.current = true
+      setSettled(true)
+      return
+    }
+    const HOLD_MS = 500
+    /**
+     * Constant rewind speed. A fixed duration made a long chain rewind far
+     * faster than a short one; holding the speed and letting only the duration
+     * scale keeps the motion identical whatever the chain's length.
+     */
+    const UP_PX_PER_SEC = 1600
+    // Three phases, and no separate "slide to the bottom" animation: the belt
+    // simply keeps draining at the rate it already had (see BELT_TAU_MS), which
+    // is what makes the landing continuous with the streaming motion instead of
+    // a second, differently-timed gesture.
+    let phase: 'drain' | 'hold' | 'up' = 'drain'
+    let lastTs = performance.now()
+    let holdUntil = 0
+    let upStart = 0
+    let upFrom = 0
+    let upMs = 0
+    let frame = 0
+    const step = (ts: number): void => {
+      const dt = ts - lastTs
+      lastTs = ts
+      const bottom = Math.max(0, el.scrollHeight - el.clientHeight)
+      if (phase === 'drain') {
+        el.scrollTop = beltStep(el, beltRef.current, dt, true)
+        if (el.scrollTop >= bottom - 0.5) {
+          el.scrollTop = bottom
+          phase = 'hold'
+          holdUntil = ts + HOLD_MS
+        }
+      } else if (phase === 'hold') {
+        el.scrollTop = bottom
+        if (ts >= holdUntil) {
+          phase = 'up'
+          upFrom = bottom
+          upStart = ts
+          upMs = bottom === 0 ? 0 : Math.max(90, (bottom / UP_PX_PER_SEC) * 1000)
+        }
+      } else {
+        const progress = upMs === 0 ? 1 : (ts - upStart) / upMs
+        if (progress >= 1) {
+          el.scrollTop = 0
+          flourishedRef.current = true
+          setSettled(true)
+          return
+        }
+        el.scrollTop = upFrom * (1 - progress)
+      }
+      frame = requestAnimationFrame(step)
+    }
+    frame = requestAnimationFrame(step)
+    return () => { cancelAnimationFrame(frame) }
+  }, [running, turnStreaming, expanded, preset])
+
+  /**
+   * Toggle the body while pinning this row's viewport position. Opening it adds
+   * up to eighteen lines above the composer; without the correction the
+   * conversation scroller - and this plugin's own follower - react to that jump
+   * and the view lands somewhere else entirely. Compensation runs for the
+   * length of the grid-track transition and then stops.
+   */
+  const toggleExpanded = useCallback(() => {
+    // Cleared synchronously, before the re-render, so no effect can observe the
+    // previous box's takeover state.
+    userScrolledRef.current = false
+    const anchor = commitAnchorRef.current
+    const scroller = anchor === null ? null : scrollParentOf(anchor)
+    const before = anchor?.getBoundingClientRect().top ?? 0
+    setExpanded(value => !value)
+    if (anchor === null || scroller === null) return
+    const until = performance.now() + 340
+    const pin = (): void => {
+      const delta = anchor.getBoundingClientRect().top - before
+      if (Math.abs(delta) > 0.5) scroller.scrollTop += delta
+      if (performance.now() < until) requestAnimationFrame(pin)
+    }
+    requestAnimationFrame(pin)
+  }, [])
 
   // Preserve FollowHost's layout wrapper without mounting a second scroll owner.
   return (
@@ -606,7 +855,7 @@ function AnimatedReasoning({
       <div className={css.think} data-variant="think" data-state={running ? 'running' : 'ok'}>
         {running && <span className={css.visuallyHidden}>{t('row.running')}</span>}
         <AnimatedDisclosure
-          rowClassName={css.thinkRow}
+          rowClassName={expanded ? css.thinkRow : `${css.thinkRow} ${css.thinkRowInline}`}
           leadingClassName={css.thinkLeading}
           titleClassName={css.thinkTitle}
           chevronClassName={css.thinkChevron}
@@ -621,22 +870,20 @@ function AnimatedReasoning({
           // which the locale routing test catches.
           title={(t as unknown as (key: string) => string)('message.think')}
           open={expanded}
-          onToggle={() => {
-            setAutoClosed(false)
-            setExpanded(value => !value)
-          }}
-          // The auto-close at stream end snaps on 0.1.x (no grid-track
-          // animation): the single row's follower absorbs the height step
-          // through the compositor, so animating the track too would
-          // double-animate the collapse. On 0.2.x the collapse lands exactly
-          // at the ownership handoff with nothing left to absorb it, so the
-          // track itself glides and the floor retreats gradually instead of
-          // teleporting. Manual toggles while streaming keep the glide.
-          bodyTransition={!autoClosed || !snapAutoCollapse}
+          onToggle={toggleExpanded}
+          // The body below opens only from a click, so every transition is a
+          // user toggle and keeps the grid-track glide.
           collapsedContent={(
             <>
               <span className={css.thinkSeparator} aria-hidden />
-              <span ref={summaryRef} className={css.thinkSummary} data-follow-end={running || undefined}>{summary}</span>
+              <div
+                ref={inlineRef}
+                className={css.thinkInline}
+                data-settled={settled ? '' : undefined}
+                data-follow-end={running || undefined}
+              >
+                {shown}
+              </div>
             </>
           )}
         >
@@ -845,6 +1092,7 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
             <AnimatedReasoning
               text={block.text}
               running={streaming && index === last && (groupPart !== 'reasoning' || stepTailIsReasoning)}
+              turnStreaming={streaming}
               preset={preset}
               thinkAutoExpand={thinkAutoExpand}
               logarithmicFade={logarithmicFade && data.status !== 'interrupted'}
@@ -852,7 +1100,6 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
               shouldHoldBack={shouldHoldBack}
               followSpeedCpsRef={reasoningOwnsSpeed && index === last ? rootSpeedRef : undefined}
               followRevealScaleRef={reasoningOwnsSpeed && index === last ? rootRevealScaleRef : undefined}
-              snapAutoCollapse={groupPart === undefined}
               t={t}
             />
           </FoldableReasoning>,

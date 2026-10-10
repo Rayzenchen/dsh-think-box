@@ -86,8 +86,8 @@ export type SmoothStreamLocaleKey =
 
 /** English copy. */
 export const en: Record<SmoothStreamLocaleKey, string> = {
-  title: 'Smooth stream',
-  description: 'How replies are revealed while they stream.',
+  title: 'Reasoning display enhancement',
+  description: 'How the reasoning box reveals while the model thinks.',
   enabled: 'Enable smooth streaming',
   enabledHint: 'Let this plugin render and follow streaming replies. Turn off to use the built-in Harness renderer.',
   controlScroll: 'Take over scrolling',
@@ -112,7 +112,7 @@ export const en: Record<SmoothStreamLocaleKey, string> = {
   logarithmicFade: 'Logarithmic fade',
   logarithmicFadeHint: 'Fade new answer and expanded thinking text into view. Follows the motion preference.',
   thinkAutoExpandHint: 'Open the thinking block while it streams. Turn off to keep it collapsed.',
-  debugEnabled: 'Show render diagnostics',
+ debugEnabled: 'Show render diagnostics',
   debugEnabledHint: 'Show live streaming and scroll metrics on the right side of the chat. Tune values there, then save them here.',
   debugUnavailable: 'Live diagnostics require a newer plugin Host.',
   debugPanelTitle: 'Render diagnostics',
@@ -193,8 +193,8 @@ export const en: Record<SmoothStreamLocaleKey, string> = {
 
 /** Simplified Chinese copy. */
 export const zh: Record<SmoothStreamLocaleKey, string> = {
-  title: '丝滑流式',
-  description: '回复在流式输出时如何逐字展现。',
+  title: '思维链显示增强',
+  description: '思考过程在流式输出时如何呈现、如何跟随。',
   enabled: '启用丝滑流式渲染',
   enabledHint: '由本插件渲染并跟随流式回复；关闭后使用 Harness 内置渲染。',
   controlScroll: '接管滚动',
@@ -219,7 +219,7 @@ export const zh: Record<SmoothStreamLocaleKey, string> = {
   logarithmicFade: '对数淡入',
   logarithmicFadeHint: '让回答正文和展开的思考文字由淡变实，遵循动效偏好。',
   thinkAutoExpandHint: '思考块在流式时自动展开；关闭后保持折叠，可手动展开。',
-  debugEnabled: '显示渲染调试面板',
+ debugEnabled: '显示渲染调试面板',
   debugEnabledHint: '在聊天右侧显示流式渲染和滚动的实时参数，可在面板中调节并在这里保存。',
   debugUnavailable: '当前 Host 版本不支持实时调试，请先更新插件 Host。',
   debugPanelTitle: '渲染诊断',

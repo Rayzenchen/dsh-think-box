@@ -2784,6 +2784,13 @@ export function useConversationFollow(
     // itself whenever the reply is neither streaming nor being followed.
     frameTaskRef.id = coordinator.registerTask({
       onSimulate: (_dtMs, now) => frame(now),
+      // Evicted: stop owning this port and hand back every host style the
+      // frame loop was maintaining (runway pad, motion transform), so a failed
+      // frame cannot leave the conversation scroller mis-laid-out.
+      onEvict: () => {
+        stopFollowTask()
+        if (port !== null) clearVisual(port)
+      },
     })
     frame(performance.now())
     return () => {
@@ -3236,6 +3243,14 @@ export function useConversationFollow(
       }
       settleTaskRef.id = coordinator.registerTask({
         onSimulate: (_dtMs, now) => settleFrame(now),
+        // Evicted: drop the registration and the gesture listeners this settle
+        // pass installed. The visual state is only cleared when the follow task
+        // is gone too, so a live follower is never stripped of its motion.
+        onEvict: () => {
+          stopSettleTask()
+          stopSettleListeners()
+          if (host !== null && frameTaskRef.id === null) clearVisual(host)
+        },
       })
     }
   }, [active, rootRef, speedCpsRef, revealScaleRef, predictive, predictiveRef, controlScroll])

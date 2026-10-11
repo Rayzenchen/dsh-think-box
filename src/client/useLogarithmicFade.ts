@@ -109,6 +109,15 @@ function schedule(scheduler: Scheduler): void {
       }
       return true
     },
+    // Evicted: the highlight ranges, the restored colours and the scope class
+    // are only removable through a client's dispose, and the clock will not be
+    // calling us again to do it. Clearing the id first keeps every dispose's
+    // own stopIfIdle from re-entering this path.
+    onEvict: () => {
+      scheduler.taskId = null
+      for (const client of [...scheduler.pending]) client.dispose()
+      scheduler.pending.clear()
+    },
   })
 }
 

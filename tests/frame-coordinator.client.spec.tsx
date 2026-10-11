@@ -177,6 +177,35 @@ describe('FrameCoordinator', () => {
     }
   })
 
+  it('hands an evicted task back to its owner before dropping it', () => {
+    // Fake only setTimeout: the hand-pumped rAF stub must stay in place.
+    vi.useFakeTimers({ toFake: ['setTimeout'] })
+    try {
+      const seen: string[] = []
+      coordinator.registerTask({ onSimulate: () => true, onEvict: () => { seen.push('healthy') } })
+      coordinator.registerTask({
+        onSimulate: () => { throw new Error('boom') },
+        // A throwing teardown must not take the frame down either.
+        onEvict: () => { seen.push('evicted'); throw new Error('teardown boom') },
+      })
+      coordinator.registerTask({ onSimulate: () => true, onWrite: () => { seen.push('after') } })
+
+      // The first frame only establishes the clock's time base.
+      clock.frame(1000)
+      clock.frame(1016)
+      // Only the thrower was handed back, exactly once, and the frame finished.
+      expect(seen).toEqual(['evicted', 'after'])
+      expect(coordinator.taskCount).toBe(2)
+      expect(coordinator.active).toBe(true)
+
+      clock.frame(1032)
+      expect(seen).toEqual(['evicted', 'after', 'after'])
+      expect(() => vi.runAllTimers()).toThrow()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('stops the clock when its last task unregisters', () => {
     const id = coordinator.registerTask({ onSimulate: () => true })
     expect(clock.rafCalls).toBe(1)

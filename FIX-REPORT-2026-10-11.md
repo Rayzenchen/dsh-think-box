@@ -113,3 +113,34 @@
 
 1. 重启 DSH，加载新的 `lib/client.js`。
 2. 确认没问题后提交插件目录里的改动（目前未提交）。
+
+---
+
+## 追加：合入后补上的 `onEvict`（同日）
+
+原文的 `guard` 解决了"整页卡死"，但**被驱逐的任务没人替它收尾**。`FrameTask` 只有
+`onRead / onSimulate / onWrite`，`guard` 直接删表，所有者拿不到通知；而这类任务的清理
+**不在任务对象里**，只在各自所有者的注销路径上。于是驱逐会留下半成品：
+
+| 任务 | 被驱逐后跳过的清理 | 后果 |
+|---|---|---|
+| 渐隐（`useLogarithmicFade`） | `dispose()` 的 `clearRanges()` / `restoreColors()` / 移除 scope class | 文字尾可能**永久半透明** |
+| 跟随 / 收尾（`teleprompterGlide`） | 宿主元素上 `minHeight` / `paddingBottom` / `marginTop` 的还原 | 正是原文第 2、3 个现象怀疑的**布局残留** |
+
+也就是说：修好了"卡死"，却可能把故障降级成"一个框留下视觉残渣"——而后者正是原文想修的东西。
+
+**改动**：`FrameTask` 增加可选 `onEvict`，`guard` 在删除注册前调用（`onEvict` 自身抛错也不带崩这一帧，
+同样异步报出）；三处注册各自接上既有的清理函数：
+
+- 渐隐：清空 taskId 后 `dispose()` 掉所有 pending 客户端（先清 id，避免 `stopIfIdle` 递归）；
+- 跟随：`stopFollowTask()` + `clearVisual(port)`（归还赛道内边距与动效 transform）；
+- 收尾：`stopSettleTask()` + `stopSettleListeners()`，且只在跟随任务也已不在时才 `clearVisual(host)`，
+  以免误伤正在工作的跟随。
+
+**新增断言**（现共 34 项）：只有抛错者被交还、同帧其余任务照常、teardown 抛错也不影响时钟。
+
+**两处更正**：
+
+1. 上线步骤里的"重启 DSH"不必要——客户端半边由宿主按内容哈希按需下发，`link:` 安装下
+   `pnpm build` 后**刷新页面即可**（宿主下发的 `rev` 会自己变）；只有宿主半区（`lib/index.js`）改动才需要重启。
+2. 报错前缀已由 `[dsh-smooth-stream]` 改为 `[@local/dsh-think-box]`——插件已改名，而这行是用户最可能复制出来的。

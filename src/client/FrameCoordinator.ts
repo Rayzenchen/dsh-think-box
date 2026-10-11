@@ -30,6 +30,14 @@ export interface FrameTask {
   onSimulate?: ((dtMs: number, now: number) => boolean) | undefined
   /** DOM and visual style mutation phase (transform, text, scrollTop). */
   onWrite?: ((now: number) => void) | undefined
+  /**
+   * Called when the coordinator evicts this task after it threw, right before
+   * the registration is dropped. The owner is the only one who knows what the
+   * task was holding open - highlight ranges, host layout styles, listeners -
+   * and a task that died mid-flight would otherwise strand them on the page.
+   * May call `unregisterTask` for its own id; that is a no-op by then.
+   */
+  onEvict?: (() => void) | undefined
 }
 
 export class FrameCoordinator {
@@ -160,8 +168,17 @@ export class FrameCoordinator {
     try {
       return run()
     } catch (error) {
-      if (this.tasks.get(task.id) === task) this.tasks.delete(task.id)
-      const wrapped = new Error(`[dsh-smooth-stream] frame task ${task.id} threw in ${phase}; task evicted`, { cause: error })
+      if (this.tasks.get(task.id) === task) {
+        this.tasks.delete(task.id)
+        // Let the owner release what the frame loop was maintaining. A teardown
+        // that throws must not take the frame down with it either.
+        try {
+          task.onEvict?.()
+        } catch (teardownError) {
+          setTimeout(() => { throw teardownError }, 0)
+        }
+      }
+      const wrapped = new Error(`[@local/dsh-think-box] frame task ${task.id} threw in ${phase}; task evicted`, { cause: error })
       setTimeout(() => { throw wrapped }, 0)
       return undefined
     }

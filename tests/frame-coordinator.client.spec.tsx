@@ -148,6 +148,35 @@ describe('FrameCoordinator', () => {
     expect(coordinator.taskCount).toBe(1)
   })
 
+  it('evicts a throwing task and keeps the clock and other tasks running', () => {
+    // Fake only setTimeout: the hand-pumped rAF stub must stay in place.
+    vi.useFakeTimers({ toFake: ['setTimeout'] })
+    try {
+      const seen: string[] = []
+      coordinator.registerTask({ onSimulate: () => { seen.push('a'); return true } })
+      const bad = coordinator.registerTask({ onSimulate: () => { throw new Error('boom') } })
+      coordinator.registerTask({ onSimulate: () => true, onWrite: () => { seen.push('c') } })
+
+      clock.frame(1000)
+      clock.frame(1016)
+      // Tasks after the thrower still ran in the same frame.
+      expect(seen).toEqual(['a', 'c'])
+      expect(coordinator.taskCount).toBe(2)
+      expect(coordinator.active).toBe(true)
+
+      clock.frame(1032)
+      expect(seen).toEqual(['a', 'c', 'a', 'c'])
+      // The owner's later unregister of the evicted id is harmless.
+      coordinator.unregisterTask(bad)
+      expect(coordinator.taskCount).toBe(2)
+
+      // The error is still reported, asynchronously.
+      expect(() => vi.runAllTimers()).toThrow(/frame task .* threw in onSimulate/)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('stops the clock when its last task unregisters', () => {
     const id = coordinator.registerTask({ onSimulate: () => true })
     expect(clock.rafCalls).toBe(1)

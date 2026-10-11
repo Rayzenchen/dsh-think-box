@@ -118,20 +118,25 @@ export class FrameCoordinator {
       const dtMs = Math.max(1, Math.min(frameIntervalMs, 100))
       this.lastTs = now
 
+      // Every task callback runs through `guard`: a throwing task is evicted
+      // and reported, while the remaining tasks and the clock keep running.
+      // Without it one exception would abort the tick before it re-armed,
+      // freezing every consumer (reveal, follow, fade, settle cleanup).
+
       // 1. Read phase (only when some task declared layout dirty).
       if (this.layoutDirty) {
         this.layoutDirty = false
-        for (const task of this.tasks.values()) task.onRead?.(now)
+        for (const task of this.tasks.values()) this.guard(task, 'onRead', () => task.onRead?.(now))
       }
 
       // 2. Simulate phase (pacing step, spring, lag, bucket math).
       let anyActive = false
       for (const task of this.tasks.values()) {
-        if (task.onSimulate?.(dtMs, now) === true) anyActive = true
+        if (this.guard(task, 'onSimulate', () => task.onSimulate?.(dtMs, now)) === true) anyActive = true
       }
 
       // 3. Write phase (transforms, text nodes, CSS variables, scrollTop).
-      for (const task of this.tasks.values()) task.onWrite?.(now)
+      for (const task of this.tasks.values()) this.guard(task, 'onWrite', () => task.onWrite?.(now))
 
       // Stay armed while a task is active, while a pending read is owed, or
       // while callers keep the clock explicitly running.
@@ -143,6 +148,23 @@ export class FrameCoordinator {
     }
 
     this.rafId = win.requestAnimationFrame(tick)
+  }
+
+  /**
+   * Run one task callback. On throw, evict the task (a task that failed once
+   * is in an unknown state and would likely throw every frame) and report the
+   * error asynchronously so it still surfaces in the console without
+   * unwinding the current tick. The owner's later unregisterTask is a no-op.
+   */
+  private guard<T>(task: FrameTask, phase: keyof Omit<FrameTask, 'id'>, run: () => T): T | undefined {
+    try {
+      return run()
+    } catch (error) {
+      if (this.tasks.get(task.id) === task) this.tasks.delete(task.id)
+      const wrapped = new Error(`[dsh-smooth-stream] frame task ${task.id} threw in ${phase}; task evicted`, { cause: error })
+      setTimeout(() => { throw wrapped }, 0)
+      return undefined
+    }
   }
 
   private stopLoop(): void {

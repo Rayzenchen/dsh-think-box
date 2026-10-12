@@ -1,4 +1,4 @@
-  # dsh-smooth-stream
+# dsh-smooth-stream
 
 > **Transform jumpy AI outputs into a calm, teleprompter-smooth reading experience.**  
 > Physics-based stream rendering and zero-reflow viewport tracking for the DeepSeek Harness (`dsh`) Web UI.

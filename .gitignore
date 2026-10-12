@@ -21,3 +21,7 @@ benchmarks/results/
 .workbuddy/
 .gtoffice/
 skills-lock.json
+
+# Local one-off diagnostic scripts (kept on disk, not tracked)
+scratch/capture-composer-bug.js
+scratch/check-scroll.js

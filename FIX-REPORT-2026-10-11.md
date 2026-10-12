@@ -1,9 +1,16 @@
 # 思维链显示增强：完成后界面卡住 / 输入框上飘 —— 修复汇报
 
-日期：2026-10-11
+日期：2026-10-11（2026-10-12 追加现场排查，见文末）
 插件：`@local/dsh-think-box`（`dsh-think-box-plugin/`）
 
-## 结论
+> **接手者先读这里（2026-10-12 更新）**
+>
+> - 下面第一部分（10-11）的"时钟停摆"推断已被 10-12 的现场数据**否定**：bug 发生时时钟在正常跑（约 60fps），页面上也没有插件残留的样式。那两次提交（`17ddaf0`、`69e9a0d`）作为一般性的健壮性改进可以保留，但**修不了这个 bug**。
+> - 当前最可信的结论在文末的「2026-10-12 现场排查」：浏览器合成器里对话区的**滚动范围卡在了一个旧值**，和主线程的布局对不上。没有任何 JS 在改滚动位置。
+> - **根因仍未确认**，think-box 是否诱发了这个问题也还没定论。用户已自行关闭 think-box 插件。
+> - 建议从文末「未解决的问题与接手建议」开始。
+
+## 结论（10-11 原文，已过时，保留作记录）
 
 - 根因**未确认**：这个问题没能复现。
 - 已做一处**防御性修复**：插件的共享动画时钟以前会被单个任务的异常彻底停掉，现在不会了。这是目前最可疑的诱因，能解释用户看到的全部三个现象。
@@ -144,3 +151,123 @@
 1. 上线步骤里的"重启 DSH"不必要——客户端半边由宿主按内容哈希按需下发，`link:` 安装下
    `pnpm build` 后**刷新页面即可**（宿主下发的 `rev` 会自己变）；只有宿主半区（`lib/index.js`）改动才需要重启。
 2. 报错前缀已由 `[dsh-smooth-stream]` 改为 `[@local/dsh-think-box]`——插件已改名，而这行是用户最可能复制出来的。
+
+---
+
+## 2026-10-12 现场排查：bug 在用户的 DSH 里出现了
+
+这一节记录的是 bug **真正发生**时在用户的 DSH 窗口里采到的数据。用户把出问题的页面一直开着，在 DevTools Console 里跑了几轮采集脚本。数据都来自同一个窗口、同一个会话，以下数值除特别说明外都是 CSS 像素。
+
+### 环境
+
+- DeepSeek Harness 0.2.0-rc.2，Electron 44.0.0 / Chrome 152.0.7977.54，macOS。
+- 屏幕 1440×900，dpr 2；渲染器视口 870×900（侧栏占了左边）。
+- 会话：2 轮、46 步，回合用时 5 分 24 秒，含大段代码 diff（shiki 高亮）。
+- 输入框上方挂着 DSH 自带的「任务 13 已完成」面板，而且是展开的。
+- DSH 进程 10-11 21:05 启动；修复构建 `lib/client.js` 生成于 21:17。页面里实际跑的是哪一版 think-box **没能确认**：脚本在 `performance` 资源列表里找不到 think-box 的脚本地址。
+
+### 第 1 轮：Console 报错截图
+
+用户贴了 Console 截图，共 158 个错误、2 个警告，逐类检查后**没有一条指向 think-box**：
+
+| 报错 | 来源 | 结论 |
+|---|---|---|
+| `GET dsh-app://app/plugins/events net::ERR_FAILED 200 (OK)`，大量重复 | DSH 自带的 `dsh-client-hmr`：插件热重载用的 SSE 长连接，断了以后反复重连 | 与 think-box 无关，属于噪声 |
+| `dsh-app://app/api/ch…&seq=…` 404 | DSH 自带的 `dsh-client-ui-deliverables`（`/api/changes.summary`、`/api/changes.diff`），表示宿主已不再提供这份改动摘要 | 与 think-box 无关 |
+| `[connection] connection lost, retry #1` ×2 | 前端与宿主的连接断开后重连上了。按 `[dsh-del]` 日志时间戳换算，约在 10-12 10:03 和 10:50 | 时间上和 bug 是否相关，不确定 |
+| `[dsh-smooth-stream] no host config bridge; using defaults` ×2（分别来自 `index.ts:31` 和 `index.ts:87`） | think-box 的客户端半边被加载了两次，第二次没拿到宿主下发的配置（`__DSH_SMOOTH_STREAM_CONFIG__`），用默认值运行 | 说明发生过一次客户端重载，和 bug 的关系未知 |
+
+- 用户在 Console 的 Filter 里搜 `evict`，**无结果**，也就是 `guard()` 一次也没有驱逐过任务。
+- 我在隔离的 DSH 里补测过"回合进行中断网 6 秒再恢复"，结束后点开工作步骤，**没能复现**。
+
+### 第 2 轮：状态快照，自动点开再收起工作步骤
+
+脚本：`scratch/capture-composer-bug.js`。
+
+- **时钟没停**：1.5 秒内 92 帧（约 60fps）。期间 0 次 DOM 变化、0 滚动，是因为回合已经结束，属于正常。
+- **页面数据里输入框一直贴底**：点开前、点开后、收起后，`[data-composer-seat]` 都是 `[730, 900]`，距对话区底边 0。它的定位是 `position: sticky; bottom: 0`，往外的父元素链（`ST7X_W_scrollBody` → `ST7X_W_body` → `ST7X_W_root` → …）没有任何异常样式。
+- **没有插件残留**：对话区里没有 margin、padding、`max-height`、位移之类的内联样式。对话列只有 `min-height: 0px`，这是正常的收尾值；`data-follow-owned` 已释放。
+- 思考框（`._9UDOYW_thinkInline` / `._9UDOYW_thinkBody`）带着 `transform: translateZ(0)`，各自是独立的 GPU 合成层。页面上共有 77 个元素有 transform 或 will-change。
+- 点开工作步骤时 `scrollTop` 从 1427 跳到 179，这是 DSH 自己的展开逻辑。
+
+→ 结论：**10-11 的"时钟停摆 + 样式残留"推断不成立。**
+
+### 第 3 轮：页面数据和屏幕画面对不上
+
+用户截图里输入框画在了窗口中上部，下面还露出一大段代码块，同时**往下滚不到底**。同一时刻读到的页面数据却是：
+
+```
+seatTop 730, seatBottom 900, viewportHeight 900, portBottom 900, domSaysAtBottom true
+scrollTop 1427, floor 2207
+```
+
+- 我用"给 `<html>` 设一下 `translateZ(0)` 再撤掉"做了一次强制重绘，**画面没变**。
+- 又跑了 4 步对照：记录滚轮、用代码把 `scrollTop` 设到底、**用 `!important` 关掉思考框的 `transform`、`will-change` 和 `contain`**、把对话区的 `overflow-y` 切到 hidden 再切回来。**每一步画面都没有变化。**
+
+→ 思考框的强制 GPU 层基本可以排除，那几个强制图层的属性去掉了也没用。
+
+### 第 4 轮：视口检查，出现关键现象
+
+脚本在页面上画一个 `position: fixed; inset: 0` 的红框加底部红条，持续 10 秒。结果：
+
+- 红框正常显示，红条**贴着窗口最底边**，所以渲染器的视口尺寸没有错位：`innerHeight 900`，`visualViewport` 也是 870×900，缩放 1。
+- 页面本身没有被滚动（`document.scrollingElement.scrollTop 0`），也没有哪个 `overflow` 非 auto/scroll 的元素被滚动过。
+- 输入框这时是 `[542, 900]`，高 358，比第 2 轮的 170 高了一截。在输入框中轴上每隔 100px 取一个点，y=610、710 落在 `li.w9rwOa_item` 上（属于输入框），这正是 DSH 的「任务」面板列表（`dsh-client-ui-conversation` 里的 `.w9rwOa_*`：`backdrop-filter` 毛玻璃，列表 `max-height: 180px; overflow-y: auto`）。所以从页面数据看，是输入框**变高了**（任务面板展开），并没有"飞走"。
+- **关键现象（用户观察）**：红框显示的那 10 秒里，**可以滚到底**；红框一移除，又卡回原位、滚不到底。输入框画面上的位置全程没变。
+
+### 第 5 轮：滚动拦截
+
+脚本：`scratch/check-scroll.js`。它在对话区上拦截了 `scrollTop` 的写入（用实例级的 `defineProperty`），并包装了 `scrollTo` / `scrollBy` / `scrollIntoView` 和 `Element.prototype.scrollIntoView`，同时记录滚轮和 scroll 事件。分两段：前 12 秒用户反复滚动；后 8 秒在右下角加一个 4×4 的 `position: fixed` 小方块再滚一次。
+
+- **没有任何 JS 写过滚动位置**：`writes: []`。think-box、DSH、其他插件都没在这期间改过。
+- 用户往下滚时，`scrollTop` 停在 **1427**。每次越过一点（1454 / 1448 / 1457 / 1434 / 1431 / 1429）都会在约 15ms 内回到 1427，这期间同样没有任何 JS 写入。
+- 往上滚完全正常，可以一路滚到 0，再往下又停在 1427 附近。
+- 主线程报告的滚动上限 `scrollHeight - clientHeight` 一直是 **2395**。
+- 第 2 段的 4×4 小方块**没有效果**，依然滚不到底，输入框画面也不变。
+
+### 目前的判断（推断，未证实）
+
+- **"滑不到底"**：浏览器合成器里对话区（`[data-conversation-scroll]`）的滚动范围停在了某个旧值，大约 1427 加视口高度；主线程的布局是对的，上限是 2395。用户的滚动由合成器处理，被夹在旧上限上，所以能看到"越过一点就弹回来"。这种夹取发生在浏览器内部，JS 拦截不到，和 `writes: []` 对得上。
+- **红框能临时修好**：全屏的 `position: fixed` 层很可能让 Chromium 放弃在合成器线程滚动，改由主线程处理。主线程的范围是对的，所以那 10 秒能滚到底。4×4 的小方块太小，没有触发这个切换。
+- **"输入框飞到中上部"**：屏幕上看到的输入框画面和页面数据不一致，很可能是同一份过期的合成器状态在显示上的表现。输入框是挂在这个滚动区域里的吸底元素，上面还挂着带毛玻璃的「任务」面板。这一点还没有直接证据。
+- **退出再进入就好**：这个滚动区域会被整个重建，合成器状态也随之重新生成。
+
+### 已排除
+
+| 方向 | 证据 |
+|---|---|
+| 时钟停摆（10-11 的推断） | bug 发生时约 60fps；`evict` 无结果 |
+| 插件在宿主元素上留下样式 | 第 2 轮快照里没有任何残留 |
+| 思考框的强制 GPU 层 | 第 3 轮第 3 步用 `!important` 关掉后无变化 |
+| 渲染器视口尺寸错位 | 第 4 轮：红框贴底，`innerHeight` 与 `visualViewport` 一致 |
+| 页面或某个父元素被滚动 | 第 4 轮：`scrollingElement` 为 0，`hiddenScrolled` 为空 |
+| 有 JS 把滚动位置拉回去 | 第 5 轮：`writes` 为空 |
+
+### 未解决的问题与接手建议
+
+1. **think-box 到底有没有诱发这个问题？**
+   - 用户已关闭 think-box。如果关闭后问题**再也不出现**，基本就是 think-box 诱发的；**仍然出现**，就转查 DSH、Electron 或 Chromium。这是目前最便宜的判别方法，建议先等这个结论。
+   - 如果确认和 think-box 有关，最可疑的是跟随引擎（`src/client/teleprompterGlide.ts`）在流式输出期间对滚动容器的高频操作：每帧写 `scrollTop`；改 `overflow-anchor` / `scroll-behavior`；改对话列的 `min-height` / `padding-bottom`、状态行的 `margin-top`；给所有消息行加 `translate3d` + `will-change: transform`，结束时再撤掉。合成器的滚动范围可能就是在这些"尺寸变化 + 图层提升/撤销"的交错中没能同步。
+2. **怎么在本地复现**：在隔离环境里用假模型跑过约 20 轮（纯文本、带工具调用、中途滚动、改窗口大小、暂停 rAF、连发、最小化、中途断网），**都没复现**。用户现场有几个条件我没模拟到，值得优先尝试：
+   - 很长的回合（5 分钟以上、46 步）；
+   - 大段 shiki 代码 diff；
+   - 输入框上方展开着「任务」面板；
+   - 期间发生过 `connection lost` 重连和客户端重载；
+   - 窗口没有焦点（`hasFocus: false`）。
+3. **怎么拿到直接证据**：我从页面 JS 看不到合成器的状态。可以在 DSH 里打开 DevTools 的 Rendering 面板，勾选 "Scrolling performance issues"（会标出不能在合成器线程滚动的区域）和 "Layer borders"，或者查看 Layers 面板。
+4. **页面上跑的是哪版 think-box**：10-11 的两次提交是否已经加载进这个页面，没能确认。
+
+### 现场采集用的脚本
+
+都在 `scratch/` 下，未提交，只读或临时改动（结束后自动撤销），不修改插件文件：
+
+- `scratch/capture-composer-bug.js`：状态快照（输入框父元素链、内联样式和位移、消息流尾部、帧数/DOM 变化），并自动点开再收起最后一个工作步骤。
+- `scratch/check-scroll.js`：拦截滚动写入并记录调用栈，记录滚轮和 scroll 轨迹，附带 4×4 固定小方块对照。
+
+第 3、4 轮用的强制重绘、4 步对照、红框视口检查脚本已经删掉，做法都写在上面了，需要的话可以照着重写。
+
+### 当前状态
+
+- think-box 已由用户自行关闭。
+- 插件仓库：`17ddaf0`、`69e9a0d` 已提交（时钟兜底 + `onEvict`）。工作区里还有一处不是我改的 `README.en.md` 修改未提交，另外 `scratch/` 下的两个脚本未跟踪。
+- 本轮排查**没有改任何插件代码**。

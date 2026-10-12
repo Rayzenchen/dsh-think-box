@@ -6,6 +6,7 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
 import type { ChatNodeViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import { claimApplyOwnership, type StandDown } from './applyOwnership.ts'
 import { TypewriterAssistantNodeView } from './TypewriterAssistantNodeView.tsx'
 import { wrapFollowNodeView, type FollowWrapProps } from './TypewriterToolNodeView.tsx'
 import { SmoothStreamCard } from './SmoothStreamCard.tsx'
@@ -230,6 +231,25 @@ class SettingsCell {
  * @param ctx - Browser context carrying the shared slot registry.
  */
 export function apply(ctx: ClientContext): void {
+  // Everything this instance installs, released in reverse order when a newer
+  // instance takes over. Collected lazily: ownership has to be claimed before
+  // the first registration, but the teardown only exists once they have run.
+  const disposers: StandDown[] = []
+  const keep = (value: unknown): void => {
+    if (typeof value === 'function') {
+      disposers.push(value as StandDown)
+      return
+    }
+    // Cordis hands back a Fiber in some versions; accept either shape so the
+    // stand-down never silently degrades into "nothing to release".
+    const disposable = value as { dispose?: unknown } | null
+    if (disposable !== null && typeof disposable?.dispose === 'function') {
+      disposers.push(() => { (disposable as { dispose: () => void }).dispose() })
+    }
+  }
+  const releaseOwnership = claimApplyOwnership(() => {
+    for (const dispose of [...disposers].reverse()) dispose()
+  })
   const config = readBootConfig()
   const settings = new SettingsCell()
   const useControlScroll = (): boolean => useSyncExternalStore(
@@ -265,7 +285,7 @@ export function apply(ctx: ClientContext): void {
   // Connection-backed settings card. Keeping this injection independent means
   // a deployment can stream localized replies without Connection, and a
   // transient disconnect cannot dispose the renderer's fallback dictionary.
-  ctx.inject(['locale'], (localeCtx) => {
+  keep(ctx.inject(['locale'], (localeCtx) => {
     localeCtx.effect(
       () => localeCtx.locale.register(CHAT_NS, { zh: chatZh, en: chatEn }),
       'dsh-smooth-stream: conversation fallback dictionary',
@@ -285,12 +305,12 @@ export function apply(ctx: ClientContext): void {
     return () => {
       if (assistantT === bound) assistantT = undefined
     }
-  })
+  }))
 
   // The card talks to the plugin-owned loopback RPC, so the core settings
   // namespace allowlist cannot make it disappear. The stream still applies
   // with defaults when the optional Settings UI or Connection is absent.
-  ctx.inject(['slots', 'locale', 'connection'], (settingsCtx) => {
+  keep(ctx.inject(['slots', 'locale', 'connection'], (settingsCtx) => {
     const card = new SmoothStreamCardController(
       // The shared Context augmentation also carries the Host-side Connection
       // shape. This browser entry runs after the client provider installs its
@@ -341,7 +361,7 @@ export function apply(ctx: ClientContext): void {
       detachSettings()
       detachBinding()
     }
-  })
+  }))
 
 
   const configured = function StreamConfiguredView(props: AssistantProps) {
@@ -373,7 +393,7 @@ export function apply(ctx: ClientContext): void {
       motionPreference: preferences.motionPreference,
     })
   }
-  ctx.slots.inject('conversation.chat.node', () => {
+  keep(ctx.slots.inject('conversation.chat.node', () => {
     let releaseTakeover: (() => void) | undefined
     let usedSwap = false
 
@@ -448,5 +468,9 @@ export function apply(ctx: ClientContext): void {
       offSlotChange()
       releaseTakeover?.()
     }
-  })
+  }))
+
+  // Wind-down hook: a later instance clears the slot itself when it takes over,
+  // so this only has to cover this instance being disposed on its own.
+  ctx.effect(() => releaseOwnership, 'dsh-smooth-stream: client apply ownership')
 }

@@ -434,7 +434,11 @@
    * code element is an inline-flex formatting context; Chromium's
    * text-box-trim can shrink the li's layout box below the code's painted
    * second line, letting the following item start inside that line. */
-  .root :is(p, h1, h2, h3, h4, h5, h6, blockquote) {
+  /* Never trim a block that holds an image. Chromium trims such a line box
+   * to the text's font edges, ignoring the atomic inline in it: a 360px
+   * markdown image inside a trimmed <p> left the paragraph 22px tall, so the
+   * image spilled over the text above and below it and stayed pinned there. */
+  .root :is(p, h1, h2, h3, h4, h5, h6, blockquote):not(:has(img)) {
     text-box-trim: trim-both;
     text-box-edge: text;
   }

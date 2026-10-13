@@ -765,13 +765,22 @@ function AnimatedReasoning({
     // Never live in this mount: a restored transcript block, already settled.
     if (!liveRef.current) return
     const el = inlineRef.current
-    if (el === null || expanded) {
-      // Already collapsed, or the body is open: skip straight to the end state.
+    // Already collapsed, the body is open, or nobody can see the page: skip
+    // straight to the end state. A hidden page (window on another desktop,
+    // minimized) gets no animation frames, so a flourish started now would
+    // only resume on return, from a stale position.
+    if (el === null || expanded || el.ownerDocument.visibilityState === 'hidden') {
       flourishedRef.current = true
       setSettled(true)
       return
     }
     const HOLD_MS = 500
+    /**
+     * A frame gap this long means the page stopped painting mid-flourish. The
+     * reader missed it, so it finishes at once instead of replaying a slow
+     * slide from wherever the box was left.
+     */
+    const STALE_FRAME_GAP_MS = 500
     /**
      * Constant rewind speed. A fixed duration made a long chain rewind far
      * faster than a short one; holding the speed and letting only the duration
@@ -792,6 +801,12 @@ function AnimatedReasoning({
     const step = (ts: number): void => {
       const dt = ts - lastTs
       lastTs = ts
+      if (dt > STALE_FRAME_GAP_MS) {
+        el.scrollTop = 0
+        flourishedRef.current = true
+        setSettled(true)
+        return
+      }
       const bottom = Math.max(0, el.scrollHeight - el.clientHeight)
       if (phase === 'drain') {
         el.scrollTop = beltStep(el, beltRef.current, dt, true)

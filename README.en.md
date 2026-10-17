@@ -118,8 +118,10 @@ To uninstall: `pnpm dsh plugin --profile web remove dsh-smooth-stream`.
 | 0.1.0-rc.5 - 0.1.0-rc.7 | ✅ all versions |
 | 0.1.1-rc.2 | ✅ all versions |
 | 0.1.2-alpha.1 - 0.1.2-alpha.3 | ✅ 0.4.3+; 0.4.2 and earlier fail to load on 0.1.2 because they statically import the removed helper |
+| 0.2.1-rc.1 (verified live on 2026-10-17) | ✅ streaming/scroll/think box fine; the configuration card now rides the sidebar Plugins page's `plugins.bundle.config` slot (the legacy `settings.plugin.item` registration stays for older kernels) |
 
-- ✅ = compatible. `0.1.2-alpha.3` is the current host kernel and has been verified live (built-artifact import + test suites); the remaining kernels are covered by the dual-kernel-compatible design (one build, one API surface).
+- ✅ = compatible. `0.1.2-alpha.3` is the current host kernel and has been verified live (built-artifact import + test suites); the remaining kernels are covered by the dual-kernel-compatible design (one build, one API surface). That row is the upstream record at fork time; this machine now runs **0.2.1-rc.1**.
+- **Since 0.2.1 plugin configuration moved from Settings onto the sidebar Plugins page**: the shell keeps official-plugin and profile-bundle configuration there and leaves Settings to a read-only inventory. This plugin therefore registers its card into `plugins.bundle.config` (`key: '@local/dsh-think-box'`, rendered between the bundle description and its rows), while the old `settings.plugin.item` registration stays for older kernels.
 - **Kernel 0.1.2 removed the `settingsNamespace()` runtime helper** (on ≤ 0.1.1 it was a validating identity function; 0.1.2 keeps only the same-named type). This plugin does not statically import that symbol any more — it inlines its namespace constant locally and asserts it as the `SettingsNamespace` type, which works on both old and new kernels.
 - Since 0.4.3 the plugin no longer statically imports `settingsNamespace()` (see the compat fix in git history); older versions only work on kernels ≤ 0.1.1.
 - **Never statically import runtime symbols from `@deepseek-ai/*` packages.** The host CLI starts via `node --import tsx/esm`, and tsx applies the host `tsconfig` `paths` mapping, so a bare `@deepseek-ai/*` import from an external plugin may be redirected into the host's own sources — any host-side rename or removal then explodes at boot as a module instantiation error. Type-only imports (`import type`) are unaffected.
@@ -138,7 +140,7 @@ The plugin defaults to `preset: balanced`. You can tune the cadence in your prof
 
 ## User Preferences
 
-Open **Settings → Plugins → Plugin Configuration** in the Web UI:
+Open **sidebar Plugins → `@local/dsh-think-box` bundle page** in the Web UI (on 0.2.0 and earlier: **Settings → Plugins → Plugin Configuration**) to tune the **Smooth stream** card:
 
 **Logarithmic fade** (on by default) adapts the tail from 24 to at most 160 graphemes according to reveal speed, fading answers and expanded thinking from 0% opacity over 240ms with a reversed logarithmic curve that stays translucent longer. Text settles even during network pauses. Turning it off preserves text pacing and scrolling. It follows the motion preference and skips code, formulas and thinking summaries. Browsers without text-range highlighting support retain the existing reveal behavior.
 

@@ -1,21 +1,30 @@
 /**
- * The smooth-stream plugin configuration card, rendered inside the Web
- * Settings "plugin configuration" page. Preferences are staged until the user
- * saves — the same shape as the Host-shipped cards, hand-drawn because the
- * Host cards' chrome is not exported for reuse.
+ * The smooth-stream plugin configuration card. Preferences are staged until
+ * the user saves — the same shape as the Host-shipped cards, hand-drawn
+ * because the Host cards' chrome is not exported for reuse.
+ *
+ * Where it renders depends on the Harness generation: up to 0.2.0 it was a card
+ * on the Web Settings "plugin configuration" page (`settings.plugin.item`);
+ * 0.2.1 moved plugin configuration onto the sidebar Plugins page, where a
+ * bundle registers `plugins.bundle.config` keyed by its package name and the
+ * page renders it between the bundle description and its rows. Both
+ * registrations live in `index.ts`; this module stays slot-agnostic.
  */
 
 import { useState } from 'react'
-import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
+import type { InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import { IconChevronDown, IconRefresh } from './harnessIcons.ts'
 import type { SmoothStreamCardFace } from './smooth-stream-card-controller.ts'
 import css from './SmoothStreamCard.module.css'
 
-/** Props the renderer binds for the smooth-stream card. */
+/**
+ * Props the renderer binds for the smooth-stream card: the locale dictionary
+ * plus the face injected by the controller. Deliberately free of per-slot
+ * types — the two registrations target SlotMaps from different Harness
+ * generations, and the pinned type packages cannot describe both.
+ */
 export type SmoothStreamCardProps =
-  PropsRuntime<'settings.plugin.item'>
-  & PropsLocale<'settings.smoothStream'>
+  PropsLocale<'settings.smoothStream'>
   & InjectFace<SmoothStreamCardFace>
 
 /** Render the smooth-stream card independently of the core settings namespace allowlist. */
@@ -224,5 +233,31 @@ export function SmoothStreamCard(props: SmoothStreamCardProps) {
         )
         : null}
     </li>
+  )
+}
+
+/**
+ * Props a 0.2.1+ Plugins page passes into a bundle configuration entry: the
+ * card props above plus the view mode the page asks for (`'page'` on the
+ * bundle detail page; `'summary'` is reserved for official-plugin cards).
+ */
+export type SmoothStreamConfigPageProps =
+  SmoothStreamCardProps
+  & { view?: 'page' | 'summary' }
+
+/**
+ * `plugins.bundle.config` entry for Harness 0.2.1+.
+ *
+ * The sidebar Plugins page renders the entry inside its own section container
+ * (`view: 'page'`), so the entry restores the plain list that the removed
+ * settings page used to draw around registered cards. The card stays an
+ * `<li>`; only its list chrome moves here.
+ */
+export function SmoothStreamConfigPage(props: SmoothStreamConfigPageProps) {
+  if (props.view === 'summary') return null
+  return (
+    <ul className={css.pluginPageList}>
+      <SmoothStreamCard {...props} />
+    </ul>
   )
 }

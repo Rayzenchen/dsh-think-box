@@ -1,6 +1,18 @@
 /* Mirrors the shipped PluginCard chrome without importing an internal module
    from another client package. */
 
+/* 0.2.1+ Plugins page: the bundle configuration entry replaces the old
+   settings-page card list, so this wrapper restores that list chrome. */
+.pluginPageList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 760px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
 .card {
   list-style: none;
   display: flex;

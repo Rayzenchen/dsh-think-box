@@ -1,15 +1,17 @@
 import { createElement, useSyncExternalStore, type ComponentType } from 'react'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
-// Type-only: the connection Context merge and the plugins section's SlotMap
-// entry ('settings.plugin.item').
+// Type-only: the connection Context merge and the legacy settings section's
+// SlotMap entry ('settings.plugin.item'). The 0.2.1+ Plugins page slot
+// ('plugins.bundle.config') has no type package in the pinned dev deps; its
+// registration is narrowed with a cast below.
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
 import type { ChatNodeViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { claimApplyOwnership, type StandDown } from './applyOwnership.ts'
 import { TypewriterAssistantNodeView } from './TypewriterAssistantNodeView.tsx'
 import { wrapFollowNodeView, type FollowWrapProps } from './TypewriterToolNodeView.tsx'
-import { SmoothStreamCard } from './SmoothStreamCard.tsx'
+import { SmoothStreamCard, SmoothStreamConfigPage } from './SmoothStreamCard.tsx'
 import { SmoothStreamCardController } from './smooth-stream-card-controller.ts'
 import { createSmoothStreamSettingsApi } from './smooth-stream-settings-api.ts'
 import { DebugPanel } from './DebugPanel.tsx'
@@ -338,6 +340,22 @@ export function apply(ctx: ClientContext): void {
     syncDebug()
     card.start()
     settingsCtx.effect(() => settingsCtx.locale.register(SETTINGS_NS, { zh, en }), 'dsh-smooth-stream: settings dictionaries')
+    // Configuration page, 0.2.1+: plugin configuration moved out of Settings
+    // onto the sidebar Plugins page. A bundle registers `plugins.bundle.config`
+    // keyed by its package name, and the page renders the entry between the
+    // bundle description and its rows (`view: 'page'`). Both the slot name and
+    // the entry are narrowed with casts because the pinned type packages
+    // predate the slot this generation added.
+    settingsCtx.slots.inject('plugins.bundle.config' as never, () => settingsCtx.slots.register({
+      name: 'plugins.bundle.config',
+      key: '@local/dsh-think-box',
+      locale: SETTINGS_NS,
+      inject: () => card.inject(),
+    } as never, SmoothStreamConfigPage as never))
+    // Configuration card, up to 0.2.0: the Web Settings "plugin configuration"
+    // page. Kept so the fork still renders on the Harness generation it was
+    // forked from; the slot never appears on 0.2.1+, where `slots.inject`
+    // simply waits forever.
     settingsCtx.slots.inject('settings.plugin.item', () => settingsCtx.slots.register({
       name: 'settings.plugin.item',
       id: 'smooth-stream',

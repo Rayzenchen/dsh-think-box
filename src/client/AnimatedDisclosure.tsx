@@ -23,6 +23,11 @@ export interface AnimatedDisclosureProps {
   onToggle: () => void
   collapsedContent?: ReactNode
   children?: ReactNode
+  /**
+   * Row-end action area kept visible in both states. Interactive children must
+   * stop propagation: the row itself is a click/keyboard toggle.
+   */
+  trailing?: ReactNode
   rowClassName?: string | undefined
   leadingClassName?: string | undefined
   titleClassName?: string | undefined
@@ -49,6 +54,7 @@ export function AnimatedDisclosure({
   onToggle,
   collapsedContent,
   children,
+  trailing,
   rowClassName,
   leadingClassName,
   titleClassName,
@@ -84,6 +90,7 @@ export function AnimatedDisclosure({
         </span>
         <span className={cx(css.disclosureTitle, titleClassName)}>{title}</span>
         {!open && collapsedContent}
+        {trailing !== undefined && <span className={css.disclosureTrailing}>{trailing}</span>}
       </div>
       <div
         className={css.disclosureContent}

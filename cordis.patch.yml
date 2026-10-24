@@ -8,3 +8,26 @@
         revealCharsPerSec: 80
         scrollSpeedPxPerSec: 48
         maxScrollSpeedPxPerSec: 1000
+        # Reasoning translation backend.
+        #   bundle = official "思考过程翻译" bundle (Google / Bing / native
+        #            DeepSeek routes only)
+        #   llm    = translate through any registered Harness LLM route; the
+        #            route below is the free OpenCode Go DeepSeek 4.1 Flash.
+        # Change backend to `bundle` to use the bundled service again, or point
+        # provider/model at another route (e.g. deepseek-official /
+        # deepseek-flash for the paid official API).
+        translation:
+          backend: llm
+          provider: opencode-go
+          model: deepseek-v4.1-flash
+          # Preferred reasoning effort; unsupported levels fall back to `low`,
+          # then to the route's own default. Keep `low` for the cheapest/fastest
+          # translation on a thinking model.
+          reasoningEffort: low
+          # Destination language: `auto` follows the UI language.
+          targetLanguage: auto
+          maxTextChars: 4000
+          maxTokens: 8192
+          timeoutMs: 60000
+          # 默认自动翻译正在流式输出的思考块；历史思考块仍可手动点「查看译文」。
+          autoTranslate: true

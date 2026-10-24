@@ -16,8 +16,21 @@ import { SmoothStreamCardController } from './smooth-stream-card-controller.ts'
 import { createSmoothStreamSettingsApi } from './smooth-stream-settings-api.ts'
 import { DebugPanel } from './DebugPanel.tsx'
 import { debugRuntime } from './debugRuntime.ts'
+import {
+  createReasoningTranslationFace,
+  type CotTranslationRemote,
+} from './reasoningTranslation.ts'
+import { createHostTranslationFace } from './host-translation.ts'
+import { createTranslationSettingsApi, type TranslationSettingsApi } from './translation-settings-api.ts'
+import { TranslationRuntime } from './translation-runtime.ts'
+import type { TranslationCardBridge } from './smooth-stream-card-controller.ts'
 import { NS as SETTINGS_NS, CHAT_NS, en, zh, chatEn, chatZh } from './locales.ts'
-import { DEFAULT_STREAM_CONFIG, STREAM_BOOT_GLOBAL, type StreamConfig } from '../config.ts'
+import {
+  DEFAULT_STREAM_CONFIG,
+  STREAM_BOOT_GLOBAL,
+  type StreamConfig,
+  type TranslationConfig,
+} from '../config.ts'
 import { DEFAULT_STREAM_SETTINGS, STREAM_SETTINGS_NS, type StreamSettings } from '../settings.ts'
 
 /**
@@ -100,7 +113,49 @@ function readBootConfig(): StreamConfig {
   ) {
     throw new Error(`[dsh-smooth-stream] malformed ${STREAM_BOOT_GLOBAL} boot global: ${JSON.stringify(raw)}`)
   }
-  return raw as StreamConfig
+  return { ...raw as StreamConfig, translation: readTranslationConfig((raw as { translation?: unknown }).translation) }
+}
+
+/**
+ * Validate the optional translation block of the boot config. A Host older
+ * than the LLM bridge omits it, which falls back to the official bundle.
+ * @param raw - serialized translation config from the boot global.
+ * @returns the validated translation config.
+ */
+function readTranslationConfig(raw: unknown): TranslationConfig {
+  if (raw === undefined) return DEFAULT_STREAM_CONFIG.translation
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw new Error(`[dsh-smooth-stream] malformed translation boot config: ${JSON.stringify(raw)}`)
+  }
+  const value = raw as Record<string, unknown>
+  if (
+    value.backend !== 'bundle' && value.backend !== 'llm'
+    || typeof value.provider !== 'string' || value.provider === ''
+    || typeof value.model !== 'string' || value.model === ''
+    || value.reasoningEffort !== undefined && typeof value.reasoningEffort !== 'string'
+    || typeof value.targetLanguage !== 'string' || value.targetLanguage === ''
+    || typeof value.maxTextChars !== 'number' || !Number.isInteger(value.maxTextChars) || value.maxTextChars < 2
+    || typeof value.maxTokens !== 'number' || !Number.isInteger(value.maxTokens) || value.maxTokens < 1
+    || typeof value.timeoutMs !== 'number' || value.timeoutMs < 1
+    || value.autoTranslate !== undefined && typeof value.autoTranslate !== 'boolean'
+  ) {
+    throw new Error(`[dsh-smooth-stream] malformed translation boot config: ${JSON.stringify(raw)}`)
+  }
+  return {
+    backend: value.backend,
+    provider: value.provider,
+    model: value.model,
+    reasoningEffort: typeof value.reasoningEffort === 'string' && value.reasoningEffort !== ''
+      ? value.reasoningEffort
+      : DEFAULT_STREAM_CONFIG.translation.reasoningEffort,
+    targetLanguage: value.targetLanguage,
+    maxTextChars: value.maxTextChars,
+    maxTokens: value.maxTokens,
+    timeoutMs: value.timeoutMs,
+    autoTranslate: typeof value.autoTranslate === 'boolean'
+      ? value.autoTranslate
+      : DEFAULT_STREAM_CONFIG.translation.autoTranslate,
+  }
 }
 
 /**
@@ -222,6 +277,16 @@ class SettingsCell {
 }
 
 /**
+ * The optional reasoning-translation Remote shared by every think box.
+ *
+ * The bundled `@deepseek-ai/dsh-experimental-client-ui-cot-translation` client
+ * mounts `remote.cotTranslation`; the takeover renderer never renders that
+ * plugin's reasoning-body slot, so the toggle in the think box drives the same
+ * Host Remote directly. The face stays undefined until the bundle's client
+ * half is mounted and back to undefined when it unloads, which is what hides
+ * the toggle again.
+ */
+/**
  * Register the typewriter renderer after the conversation package declares the
  * keyed Chat node seat. A lower priority shadows the built-in assistant row;
  * every other keyed renderer is wrapped in place so Context, commands, Tool
@@ -254,11 +319,55 @@ export function apply(ctx: ClientContext): void {
   })
   const config = readBootConfig()
   const settings = new SettingsCell()
+  const translation = new TranslationRuntime(config.translation)
+  let translationSettingsApi: TranslationSettingsApi | undefined
+  const waitTranslationApi = async (): Promise<TranslationSettingsApi> => {
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      if (translationSettingsApi !== undefined) return translationSettingsApi
+      await new Promise(resolve => setTimeout(resolve, 100))
+    }
+    throw new Error('translation settings are not connected')
+  }
   const useControlScroll = (): boolean => useSyncExternalStore(
     settings.subscribe,
     () => settings.getSnapshot().controlScroll,
     () => settings.getSnapshot().controlScroll,
   )
+
+  // Translation backends. `llm` talks to this plugin's Host bridge, which
+  // forwards to any registered Harness route; `bundle` uses the official
+  // reasoning-translation bundle's Host Remote. Both faces stay attached, and
+  // the runtime picks one from the settings the Host store reports - so a
+  // backend change saved on the Plugins page reaches open rows without a
+  // reload, and a page that loaded before the boot injection was ready still
+  // converges once the settings read completes.
+  keep(ctx.inject(['connection', 'locale'], (hostCtx) => {
+    const connection = hostCtx.get('connection') as unknown as ConnectionHandle
+    const settingsApi = createTranslationSettingsApi(connection)
+    translationSettingsApi = settingsApi
+    translation.setHostFace(createHostTranslationFace(
+      connection,
+      () => String(hostCtx.locale.getLocale().active),
+    ))
+    translation.start(settingsApi)
+    return () => {
+      translation.stop()
+      translation.setHostFace(undefined)
+      translationSettingsApi = undefined
+    }
+  }))
+  keep(ctx.inject(['remote.cotTranslation', 'locale'], (cotCtx) => {
+    // Read the flat `remote.cotTranslation` service through the untyped `get`
+    // overload: the generated service name is outside this package's pinned
+    // `Context` surface.
+    const remote = cotCtx.get('remote.cotTranslation') as CotTranslationRemote | undefined
+    if (remote === undefined) return
+    translation.setBundleFace(createReasoningTranslationFace(
+      remote,
+      () => String(cotCtx.locale.getLocale().active),
+    ))
+    return () => { translation.setBundleFace(undefined) }
+  }))
 
   /**
    * Layered `t` for the assistant renderer.
@@ -313,11 +422,22 @@ export function apply(ctx: ClientContext): void {
   // namespace allowlist cannot make it disappear. The stream still applies
   // with defaults when the optional Settings UI or Connection is absent.
   keep(ctx.inject(['slots', 'locale', 'connection'], (settingsCtx) => {
+    const translationBridge: TranslationCardBridge = {
+      initial: translation.getSnapshot().settings,
+      read: async (signal?: AbortSignal) => await (await waitTranslationApi()).read(signal),
+      write: async (patch) => {
+        const next = await (await waitTranslationApi()).write(patch)
+        translation.apply(next)
+        return next
+      },
+      apply: (settings) => { translation.apply(settings) },
+    }
     const card = new SmoothStreamCardController(
       // The shared Context augmentation also carries the Host-side Connection
       // shape. This browser entry runs after the client provider installs its
       // handle, so narrow through unknown to its client contract here.
       createSmoothStreamSettingsApi(settingsCtx.get('connection') as unknown as ConnectionHandle),
+      translationBridge,
     )
     const detachSettings = settings.attach(card)
     const syncDebug = (): void => {
@@ -388,6 +508,11 @@ export function apply(ctx: ClientContext): void {
       settings.getSnapshot,
       settings.getSnapshot,
     )
+    const translationSnapshot = useSyncExternalStore(
+      translation.subscribe,
+      translation.getSnapshot,
+      translation.getSnapshot,
+    )
     return createElement(TypewriterAssistantNodeView, {
       ...props,
       // Override the seat's single-namespace binding with the layered lookup
@@ -409,6 +534,9 @@ export function apply(ctx: ClientContext): void {
       logarithmicFade: preferences.logarithmicFade,
       controlScroll: preferences.controlScroll,
       motionPreference: preferences.motionPreference,
+      translation: translationSnapshot.face,
+      translationLabel: translationSnapshot.label,
+      autoTranslate: translationSnapshot.settings.autoTranslate,
     })
   }
   keep(ctx.slots.inject('conversation.chat.node', () => {

@@ -60,6 +60,34 @@
 - 对话进行时，思考链与工具调用保持实时展开；
 - 回合结算完成并稳定后，自动将执行过程收敛为一行极简的 `已处理 X 秒` 摘要，保持工作区专注；支持随时点击无缝展开。
 
+### 4. 思考框内的可选机器翻译（Reasoning Translation）
+- 思考行右侧新增「查看译文 / 查看原文」切换：点一次开始翻译，流式过程中也会把已经完成的片段增量翻成界面语言，尚未完成的末尾保持原文；
+- 直接复用 Harness 官方「思考过程翻译」组合包的翻译服务与已保存结果，在插件页启用该组合包即可用；未启用时按钮不出现；
+- 只在你主动点「查看译文」之后才把思考内容发给所选翻译服务，翻译结果按 Session 保存，重新展开或刷新页面后可复用；
+- 打字机揭示与跟随滚动保持不变，翻译只替换思考框里显示的文字；随时可以切回原文。
+
+### 4.1 翻译后端（可选：官方组合包 / 任意模型路由）
+
+「查看译文」默认走官方「思考过程翻译」组合包（Google、Bing、DeepSeek 官方 API）。也可以让本插件直接调用任意已注册的 DSH 模型路由，例如免费的 OpenCode Go DeepSeek 4.1 Flash。配置写在插件自己的 `cordis.patch.yml`（组合包配置层）：
+
+```yaml
+translation:
+  backend: llm            # bundle = 官方组合包；llm = 本插件直连模型路由
+  provider: opencode-go
+  model: deepseek-v4.1-flash
+  reasoningEffort: low    # 路由不支持时自动降级到 low，再退回路由默认
+  targetLanguage: auto    # auto = 跟随界面语言
+  maxTextChars: 4000
+  maxTokens: 8192
+  timeoutMs: 60000
+```
+
+- 这些字段现在也可以在**插件页 → 思维链显示增强 → 翻译通道**里直接改、点保存，立即生效，不用重启（保存在 `~/.dsh/think-box/translation.json`）。`cordis.patch.yml` 里的值只作为首次启动的种子。
+- `backend: bundle` 时 provider/model 不生效，按插件页里选的 Google / Bing / DeepSeek 官方 API 翻译。
+- `backend: llm` 时翻译请求由 Host 转发给模型路由，按 4000 字左右分片；免费额度与限流由该路由决定。
+- `autoTranslate` 默认开启：正在流式输出的思考块会边输出边逐段翻译；历史会话里的旧思考块仍需手动点「查看译文」，避免一打开旧会话就发大量请求。
+- `llm` 后端的译文只缓存在当前页面内存中，不写 Session 记录。
+
 ---
 
 ## 效果对比

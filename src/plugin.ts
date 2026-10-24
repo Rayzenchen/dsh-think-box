@@ -5,7 +5,10 @@ import type { ConnectionRpcHandler } from '@deepseek-ai/dsh-client-connection'
 // whose dsh-settings no longer ships the value-side helper (issue #17).
 import type { SettingsNamespace } from '@deepseek-ai/dsh-settings'
 import Schema from '@deepseek-ai/schemastery'
-import { DEFAULT_STREAM_CONFIG, type StreamConfig } from './config.ts'
+import { DEFAULT_STREAM_CONFIG, DEFAULT_TRANSLATION_CONFIG, type StreamConfig } from './config.ts'
+import { createLlmTranslationRoute, createTranslationHandler, type LlmServiceLike } from './translation-host.ts'
+import { TRANSLATION_RPC_CHANNEL } from './translation-protocol.ts'
+import { createTranslationSettingsStore } from './translation-settings.ts'
 import { injectStreamConfig } from './boot-config.ts'
 import { STREAM_PACKAGE_NAME, STREAM_PACKAGE_VERSION } from './package-meta.ts'
 import { inspectProfileInstallation, updateNpmProfilePackage } from './profile-installation.ts'
@@ -48,6 +51,17 @@ export const Config: Schema<Config> = Schema.object({
     .min(1)
     .max(2000)
     .default(DEFAULT_STREAM_CONFIG.maxScrollSpeedPxPerSec),
+  translation: Schema.object({
+    backend: Schema.union(['bundle', 'llm'] as const).default(DEFAULT_TRANSLATION_CONFIG.backend),
+    provider: Schema.string().default(DEFAULT_TRANSLATION_CONFIG.provider),
+    model: Schema.string().default(DEFAULT_TRANSLATION_CONFIG.model),
+    reasoningEffort: Schema.string().default(DEFAULT_TRANSLATION_CONFIG.reasoningEffort ?? 'low'),
+    targetLanguage: Schema.string().default(DEFAULT_TRANSLATION_CONFIG.targetLanguage),
+    maxTextChars: Schema.number().min(2).max(1_000_000).default(DEFAULT_TRANSLATION_CONFIG.maxTextChars),
+    maxTokens: Schema.number().min(1).max(1_000_000).default(DEFAULT_TRANSLATION_CONFIG.maxTokens),
+    timeoutMs: Schema.number().min(1_000).max(600_000).default(DEFAULT_TRANSLATION_CONFIG.timeoutMs),
+    autoTranslate: Schema.boolean().default(DEFAULT_TRANSLATION_CONFIG.autoTranslate),
+  }).default(DEFAULT_TRANSLATION_CONFIG),
 })
 
 /**
@@ -95,12 +109,32 @@ export function apply(ctx: Context, config: Config): void {
   console.log(
     `[dsh-think-box] plugin loaded! mode=${config.mode} preset=${config.preset} `
     + `seed=${config.revealCharsPerSec}cps scroll=${config.scrollSpeedPxPerSec}px/s `
-    + `maxScroll=${config.maxScrollSpeedPxPerSec}px/s`,
+    + `maxScroll=${config.maxScrollSpeedPxPerSec}px/s `
+    + `translation=${config.translation.backend}`
+    + (config.translation.backend === 'llm'
+      ? ` route=${config.translation.provider}/${config.translation.model}`
+      : ''),
   )
   ctx.inject(['webServer'], (httpCtx) => {
     httpCtx.effect(
       () => httpCtx.webServer.tapIndex(html => injectStreamConfig(html, config)),
       'dsh-smooth-stream: boot config bridge',
+    )
+  })
+  // Opt-in LLM translation bridge: any registered Harness route can translate
+  // the think box (for example a free OpenAI-compatible provider). The route is
+  // resolved per request, so a changed catalog reaches the next translation
+  // without restarting; only the backend choice itself needs a reload.
+  const translationStore = createTranslationSettingsStore(config.translation)
+  ctx.inject(['webServer'], (translateCtx) => {
+    const route = createLlmTranslationRoute(
+      () => translationStore.snapshot(),
+      () => translateCtx.get('llm') as unknown as LlmServiceLike | undefined,
+    )
+    registerSettingsChannel(
+      translateCtx,
+      TRANSLATION_RPC_CHANNEL,
+      createTranslationHandler(route, translationStore) as unknown as ConnectionRpcHandler,
     )
   })
   // The core settings RPC deliberately filters third-party namespaces. Keep

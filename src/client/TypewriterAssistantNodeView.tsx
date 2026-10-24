@@ -10,6 +10,8 @@ import { useFpsGuard } from './useFpsGuard.ts'
 import { useLogarithmicFade } from './useLogarithmicFade.ts'
 import { useDecoupledMarkdown } from './useDecoupledMarkdown.ts'
 import { FollowHost } from './FollowHost.tsx'
+import { useReasoningTranslation } from './useReasoningTranslation.ts'
+import type { ReasoningTranslationFace } from './reasoningTranslation.ts'
 import { DEFAULT_STREAM_CONFIG, type StreamMode } from '../config.ts'
 import { DEFAULT_STREAM_SETTINGS, type StreamMotionPreference } from '../settings.ts'
 import css from './TypewriterAssistantNodeView.module.css'
@@ -549,6 +551,10 @@ function AnimatedReasoning({
   shouldHoldBack,
   followSpeedCpsRef,
   followRevealScaleRef,
+  sessionId,
+  translation,
+  translationLabel,
+  autoTranslate,
   t,
 }: {
   text: string
@@ -566,9 +572,28 @@ function AnimatedReasoning({
   shouldHoldBack: () => boolean
   followSpeedCpsRef?: { current: number } | undefined
   followRevealScaleRef?: { current: number } | undefined
+  /** Owning Session, so saved translations can be persisted and reused. */
+  sessionId: string | undefined
+  /** Optional reasoning-translation Remote; absent when the bundle is off. */
+  translation: ReasoningTranslationFace | undefined
+  /** Human-readable backend, e.g. `opencode-go · deepseek-v4.1-flash`. */
+  translationLabel: string | undefined
+  /** Translate the block automatically while it streams. */
+  autoTranslate: boolean
   t: AssistantProps['t']
 }) {
   const reduced = motionReduced
+  // Opt-in machine translation for this block. The hook only schedules work
+  // while the translated view is active, so the original feed never sends the
+  // reader's reasoning to the translation provider.
+  const translationControl = useReasoningTranslation(
+    text,
+    sessionId,
+    translation,
+    !running,
+    autoTranslate && running,
+  )
+  const sourceText = translationControl.displayText
   // A box is open while its block streams, and also while the turn is still
   // running even if this particular block never held the tail: a short chain of
   // thought finishes inside one commit and would otherwise render collapsed
@@ -610,7 +635,7 @@ function AnimatedReasoning({
   // The running鈫抐alse flip is the AUTO-close: it collapses instantly and the
   // follower's settle spring absorbs the height step. A later manual toggle
   // keeps the CSS glide.
-  const displayed = useSmoothStreamContent(text, {
+  const displayed = useSmoothStreamContent(sourceText, {
     enabled: running && !reduced,
     preset,
     shouldHoldBack,
@@ -618,7 +643,7 @@ function AnimatedReasoning({
     revealScaleRef: followRevealScaleRef,
     onRevealCommit: () => { notifyFollowCommit(commitAnchorRef.current) },
   })
-  const shown = running && !reduced ? displayed : text
+  const shown = running && !reduced ? displayed : sourceText
   // The fade and the settle lag belong to whichever box the reader sees.
   useLogarithmicFade(activeRef, logarithmicFade && !reduced, running, fadeSpeedRef)
 
@@ -864,6 +889,48 @@ function AnimatedReasoning({
     requestAnimationFrame(pin)
   }, [])
 
+  const translateLabel = (key: string): string => (t as unknown as (key: string) => string)(key)
+  const translateTrailing = translation !== undefined && translationControl.available
+    ? (
+        <>
+          {translationControl.active && translationControl.pending && (
+            <span className={css.thinkTranslateStatus}>{translateLabel('message.think.translating')}</span>
+          )}
+          {translationControl.failed && (
+            <>
+              <span className={css.thinkTranslateStatus}>{translateLabel('message.think.translateFailed')}</span>
+              <button
+                type="button"
+                className={css.thinkTranslateButton}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  translationControl.retry()
+                }}
+                onKeyDown={(event) => { event.stopPropagation() }}
+              >
+                {translateLabel('message.think.translateRetry')}
+              </button>
+            </>
+          )}
+          <button
+            type="button"
+            className={css.thinkTranslateButton}
+            aria-pressed={translationControl.active}
+            title={translationLabel}
+            onClick={(event) => {
+              event.stopPropagation()
+              translationControl.toggle()
+            }}
+            onKeyDown={(event) => { event.stopPropagation() }}
+          >
+            {translateLabel(translationControl.active
+              ? 'message.think.original'
+              : 'message.think.translate')}
+          </button>
+        </>
+      )
+    : undefined
+
   // Preserve FollowHost's layout wrapper without mounting a second scroll owner.
   return (
     <div className={css.follow} ref={commitAnchorRef}>
@@ -886,6 +953,7 @@ function AnimatedReasoning({
           title={(t as unknown as (key: string) => string)('message.think')}
           open={expanded}
           onToggle={toggleExpanded}
+          trailing={translateTrailing}
           // The body below opens only from a click, so every transition is a
           // user toggle and keeps the grid-track glide.
           collapsedContent={(
@@ -902,7 +970,9 @@ function AnimatedReasoning({
             </>
           )}
         >
-          <div ref={fadeRootRef} className={css.thinkBody}>{shown}</div>
+          <div className={css.thinkExpanded}>
+            <div ref={fadeRootRef} className={css.thinkBody}>{shown}</div>
+          </div>
         </AnimatedDisclosure>
       </div>
     </div>
@@ -937,6 +1007,10 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
   loadImage,
   fileMentions,
   turnProcess,
+  sessionId,
+  translation,
+  translationLabel,
+  autoTranslate,
   t,
 }: AssistantProps & {
   /**
@@ -956,6 +1030,12 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
   logarithmicFade?: boolean
   controlScroll?: boolean
   motionPreference?: StreamMotionPreference
+  /** Optional reasoning-translation Remote; absent when the bundle is off. */
+  translation?: ReasoningTranslationFace | undefined
+  /** Human-readable translation backend shown in the toggle tooltip. */
+  translationLabel?: string | undefined
+  /** Auto-translate live reasoning blocks instead of waiting for a click. */
+  autoTranslate?: boolean | undefined
 }) {
   const data = node.data
   const streaming = data.status === 'running'
@@ -1115,6 +1195,10 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
               shouldHoldBack={shouldHoldBack}
               followSpeedCpsRef={reasoningOwnsSpeed && index === last ? rootSpeedRef : undefined}
               followRevealScaleRef={reasoningOwnsSpeed && index === last ? rootRevealScaleRef : undefined}
+              sessionId={sessionId as unknown as string | undefined}
+              translation={translation}
+              translationLabel={translationLabel}
+              autoTranslate={autoTranslate === true}
               t={t}
             />
           </FoldableReasoning>,

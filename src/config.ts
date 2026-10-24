@@ -17,6 +17,54 @@ export const STREAM_PACKAGE_ID = '@local/dsh-think-box'
 /** Legacy render-mode value retained so existing overlays remain valid. */
 export type StreamMode = 'typewriter' | 'teleprompter'
 
+/** Which host service translates the reasoning box. */
+export type TranslationBackend = 'bundle' | 'llm'
+
+/**
+ * Reasoning-translation backend selection and limits.
+ *
+ * `bundle` keeps using the official reasoning-translation bundle (Google,
+ * Bing, or the two native DeepSeek routes). `llm` calls any registered Harness
+ * LLM route directly through this plugin's Host bridge - useful for free or
+ * self-hosted models the bundle does not accept.
+ */
+export interface TranslationConfig {
+  /** `bundle` = official cot-translation service; `llm` = direct Harness route. */
+  readonly backend: TranslationBackend
+  /** Harness LLM route used when the backend is `llm`. */
+  readonly provider: string
+  /** Exact model id used when the backend is `llm`. */
+  readonly model: string
+  /**
+   * Preferred reasoning effort. A route that does not advertise it falls back
+   * to `low`, then to the route's own default.
+   */
+  readonly reasoningEffort: string
+  /** Destination language, or `auto` to follow the UI language in the browser. */
+  readonly targetLanguage: string
+  /** Maximum UTF-16 code units accepted by one translation request. */
+  readonly maxTextChars: number
+  /** Output-token cap for one translation request. */
+  readonly maxTokens: number
+  /** Request deadline in milliseconds. */
+  readonly timeoutMs: number
+  /** Translate live reasoning automatically instead of waiting for a click. */
+  readonly autoTranslate: boolean
+}
+
+/** Default translation settings: official bundle, free-route-ready switch. */
+export const DEFAULT_TRANSLATION_CONFIG: TranslationConfig = {
+  backend: 'bundle',
+  provider: 'opencode-go',
+  model: 'deepseek-v4.1-flash',
+  reasoningEffort: 'low',
+  targetLanguage: 'auto',
+  maxTextChars: 4000,
+  maxTokens: 8192,
+  timeoutMs: 60000,
+  autoTranslate: true,
+}
+
 /** Plugin configuration validated by the Host schema and bridged to the browser half. */
 export interface StreamConfig {
   /** Compatibility field; both values use the current adaptive reveal engine. */
@@ -35,6 +83,8 @@ export interface StreamConfig {
   readonly scrollSpeedPxPerSec: number
   /** Unused at runtime; retained so existing overlays continue to load. */
   readonly maxScrollSpeedPxPerSec: number
+  /** Reasoning-translation backend and request limits. */
+  readonly translation: TranslationConfig
 }
 
 /** Defaults shared by the Host schema and the client-side fallback. */
@@ -44,6 +94,7 @@ export const DEFAULT_STREAM_CONFIG: StreamConfig = {
   revealCharsPerSec: 80,
   scrollSpeedPxPerSec: 48,
   maxScrollSpeedPxPerSec: 1000,
+  translation: DEFAULT_TRANSLATION_CONFIG,
 }
 
 /**

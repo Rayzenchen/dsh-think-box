@@ -14,7 +14,9 @@
 import { useState } from 'react'
 import type { InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import { IconChevronDown, IconRefresh } from './harnessIcons.ts'
-import type { SmoothStreamCardFace } from './smooth-stream-card-controller.ts'
+import type { SmoothStreamCardFace, TranslationCardState } from './smooth-stream-card-controller.ts'
+import type { TranslationConfig } from '../config.ts'
+import type { SmoothStreamLocaleKey } from './locales.ts'
 import css from './SmoothStreamCard.module.css'
 
 /**
@@ -32,6 +34,7 @@ export function SmoothStreamCard(props: SmoothStreamCardProps) {
   const { t } = props
   const [open, setOpen] = useState(false)
   const state = props.useSmoothStreamCard(snapshot => snapshot)
+  const translation = props.useTranslationCard(snapshot => snapshot)
   const blocked = !state.dirty || state.saving || state.status !== 'ready'
   const versionLabel = state.version === undefined
     ? null
@@ -229,10 +232,175 @@ export function SmoothStreamCard(props: SmoothStreamCardProps) {
                 </div>
               </>
             ) : null}
+            <TranslationChannel
+              t={t}
+              translation={translation}
+              edit={props.editTranslation}
+              save={props.saveTranslation}
+              discard={props.discardTranslation}
+              reload={props.reloadTranslation}
+            />
           </div>
         )
         : null}
     </li>
+  )
+}
+
+/**
+ * Translation-channel form. Kept independent of the durable smooth-stream
+ * settings so it works even where the deployment stores those read-only: it
+ * writes the plugin-owned runtime store through its own loopback RPC.
+ */
+function TranslationChannel(props: {
+  t: (key: SmoothStreamLocaleKey) => string
+  translation: TranslationCardState
+  edit: (patch: Partial<TranslationConfig>) => void
+  save: () => void
+  discard: () => void
+  reload: () => void
+}) {
+  const { t, translation } = props
+  const settings = translation.settings
+  const disabled = translation.saving
+  return (
+    <div className={css.translation}>
+      <div className={css.translationHead}>
+        <span className={css.label}>{t('translationTitle')}</span>
+        {translation.dirty ? <span className={css.pending}>{t('unsaved')}</span> : null}
+      </div>
+      <span className={css.hint}>{t('translationHint')}</span>
+      {translation.status === 'loading' ? <p className={css.readOnly} role="status">{t('translationLoading')}</p> : null}
+      {translation.status === 'unavailable' ? (
+        <div className={css.failure}>
+          <p className={css.readOnly} role="status">{t('translationUnavailable')}</p>
+          <button type="button" className={css.discard} onClick={props.reload}>{t('retry')}</button>
+        </div>
+      ) : null}
+      {translation.status === 'ready' ? (
+        <>
+          <label className={css.field}>
+            <span className={css.fieldHead}>
+              <span className={css.label}>{t('translationBackend')}</span>
+              <select
+                className={css.selectInput}
+                value={settings.backend}
+                disabled={disabled}
+                onChange={(event) => { props.edit({ backend: event.target.value === 'bundle' ? 'bundle' : 'llm' }) }}
+              >
+                <option value="llm">{t('translationBackendLlm')}</option>
+                <option value="bundle">{t('translationBackendBundle')}</option>
+              </select>
+            </span>
+            <span className={css.hint}>{t('translationBackendHint')}</span>
+          </label>
+          <label className={css.field}>
+            <span className={css.fieldHead}>
+              <span className={css.label}>{t('translationProvider')}</span>
+              <input
+                className={css.textInput}
+                type="text"
+                value={settings.provider}
+                disabled={disabled}
+                onChange={(event) => { props.edit({ provider: event.target.value }) }}
+              />
+            </span>
+            <span className={css.hint}>{t('translationProviderHint')}</span>
+          </label>
+          <label className={css.field}>
+            <span className={css.fieldHead}>
+              <span className={css.label}>{t('translationModel')}</span>
+              <input
+                className={css.textInput}
+                type="text"
+                value={settings.model}
+                disabled={disabled}
+                onChange={(event) => { props.edit({ model: event.target.value }) }}
+              />
+            </span>
+            <span className={css.hint}>{t('translationModelHint')}</span>
+          </label>
+          <label className={css.field}>
+            <span className={css.fieldHead}>
+              <span className={css.label}>{t('translationEffort')}</span>
+              <input
+                className={css.textInput}
+                type="text"
+                value={settings.reasoningEffort}
+                placeholder="low"
+                disabled={disabled}
+                onChange={(event) => { props.edit({ reasoningEffort: event.target.value }) }}
+              />
+            </span>
+            <span className={css.hint}>{t('translationEffortHint')}</span>
+          </label>
+          <label className={css.field}>
+            <span className={css.fieldHead}>
+              <span className={css.label}>{t('translationTargetLanguage')}</span>
+              <input
+                className={css.textInput}
+                type="text"
+                value={settings.targetLanguage}
+                placeholder="auto"
+                disabled={disabled}
+                onChange={(event) => { props.edit({ targetLanguage: event.target.value }) }}
+              />
+            </span>
+            <span className={css.hint}>{t('translationTargetLanguageHint')}</span>
+          </label>
+          <label className={css.field}>
+            <span className={css.fieldHead}>
+              <span className={css.label}>{t('translationMaxTextChars')}</span>
+              <input
+                className={css.numberInput}
+                type="number"
+                min={64}
+                step={100}
+                value={settings.maxTextChars}
+                disabled={disabled}
+                onChange={(event) => {
+                  const next = Number.parseInt(event.target.value, 10)
+                  if (Number.isFinite(next)) props.edit({ maxTextChars: next })
+                }}
+              />
+            </span>
+            <span className={css.hint}>{t('translationMaxTextCharsHint')}</span>
+          </label>
+          <label className={css.field}>
+            <span className={css.fieldHead}>
+              <span className={css.label}>{t('translationAutoTranslate')}</span>
+              <input
+                type="checkbox"
+                className={css.toggle}
+                checked={settings.autoTranslate}
+                disabled={disabled}
+                onChange={(event) => { props.edit({ autoTranslate: event.target.checked }) }}
+              />
+            </span>
+            <span className={css.hint}>{t('translationAutoTranslateHint')}</span>
+          </label>
+          <div className={css.translationActions}>
+            {translation.failed ? <p className={css.failed} role="status">{t('translationSaveFailed')}</p> : null}
+            <button
+              type="button"
+              className={css.discard}
+              disabled={!translation.dirty || disabled}
+              onClick={props.discard}
+            >
+              {t('discard')}
+            </button>
+            <button
+              type="button"
+              className={css.save}
+              disabled={!translation.dirty || disabled}
+              onClick={props.save}
+            >
+              {t(translation.saving ? 'saving' : 'save')}
+            </button>
+          </div>
+        </>
+      ) : null}
+    </div>
   )
 }
 

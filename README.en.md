@@ -59,6 +59,34 @@ Traditional chat UIs bind DOM rendering and scrolling directly to arrival events
 - Reasoning and tool executions remain expanded while streaming.
 - Once a turn settles, intermediate processes cleanly fold behind a minimalist `Processed in Xs` summary row, keeping the conversation view focused on final answers.
 
+### 4. Optional Reasoning Translation
+- A `Translate / Original` control on the Think row switches the box to a translated feed; completed fragments are translated incrementally while the model is still streaming, and the unfinished tail stays in the original language.
+- It reuses the Harness reasoning-translation bundle's provider and saved results: enable that bundle on the Plugins page and the control appears; with the bundle off it stays hidden.
+- Nothing leaves the machine until the reader clicks `Translate`, and finished translations are saved per Session, so re-expanding or reloading reuses them.
+- The typewriter reveal and follow scrolling keep running; translation only changes the text the box displays, and `Original` switches back instantly.
+
+### 4.1 Translation backend (official bundle or any model route)
+
+`Translate` uses the official reasoning-translation bundle by default (Google, Bing, DeepSeek official API). The plugin can instead call any registered Harness LLM route directly — for example a free OpenCode Go DeepSeek 4.1 Flash. Configure it in the plugin's own `cordis.patch.yml` (bundle config layer):
+
+```yaml
+translation:
+  backend: llm            # bundle = official bundle; llm = direct model route
+  provider: opencode-go
+  model: deepseek-v4.1-flash
+  reasoningEffort: low    # falls back to low, then the route default, when unsupported
+  targetLanguage: auto    # auto follows the UI language
+  maxTextChars: 4000
+  maxTokens: 8192
+  timeoutMs: 60000
+```
+
+- These fields can also be edited directly under **Plugins page → Reasoning display enhancement → Translation channel** and saved without a restart (stored in `~/.dsh/think-box/translation.json`). The values in `cordis.patch.yml` only seed the first launch.
+- With `backend: bundle`, provider/model are ignored and the bundle's Google / Bing / DeepSeek official API selection applies.
+- With `backend: llm`, the Host forwards ~4000-character fragments to the model route; free quota and rate limits are the route's own.
+- `autoTranslate` is on by default: a live reasoning block translates while it streams. Historical blocks still need the toggle, so opening an old conversation does not fan out a burst of requests.
+- The `llm` backend caches translations in page memory only and does not write Session records.
+
 ---
 
 ## Visual Comparison

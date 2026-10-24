@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-think-box",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "本地定制版思考显示框：常驻「思考」右侧的多行推理窗，点击展开全文，缓动追赶流式输出。",
   "meta": {
     "title": "思维链显示增强",

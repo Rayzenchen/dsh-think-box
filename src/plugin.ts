@@ -3,10 +3,8 @@ import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { ConnectionRpcHandler } from '@deepseek-ai/dsh-client-connection'
 import Schema from '@deepseek-ai/schemastery'
 import {
-  DEFAULT_STREAM_CONFIG,
   DEFAULT_TRANSLATION_CONFIG,
   type StreamConfig,
-  type StreamMode,
   type Volatile,
 } from './config.ts'
 import { createLlmTranslationRoute, createTranslationHandler, type LlmServiceLike } from './translation-host.ts'
@@ -17,16 +15,12 @@ import { registerSettingsChannel } from './settings-channel.ts'
 import {
   STREAM_SETTINGS_RPC,
   STREAM_SETTINGS_RPC_CHANNEL,
-  type StreamDebugSettingsView,
   type StreamSettingsView,
 } from './settings-api.ts'
 import {
   DEFAULT_STREAM_SETTINGS,
   STREAM_SETTINGS_NS,
-  type StreamDebugTuning,
-  type StreamMotionPreference,
   type StreamSettings,
-  type StreamSmoothingPreset,
 } from './settings.ts'
 
 /** Display name shown by the Host loader while the plugin is mounted. */
@@ -39,24 +33,18 @@ export const name = '@local/dsh-think-box'
 const CONFIG_ENTRY_ID = 'think-box'
 
 /**
- * Plugin configuration: the composition-time engine settings plus the
- * user-editable preferences the Plugins page now persists in the same profile
- * entry (0.2.x replacement for the removed `settings.register` namespace).
+ * Plugin configuration: the live preferences persisted in the profile entry
+ * config (0.2.x replacement for the removed `settings.register` namespace)
+ * plus the composition-time translation seed.
  *
- * The volatile fields are references at runtime, so every read goes through
- * `.get()`; the plain fields are ordinary composition values.
+ * The two preference fields are volatile references at runtime, so every read
+ * goes through `.get()`; translation is an ordinary composition value.
  */
 export interface Config {
-  /** Compatibility field; both values use the current adaptive reveal engine. */
-  readonly mode: StreamMode
-  /** Smoothing preset for the reveal cadence (live user preference). */
-  readonly preset: Volatile<StreamSmoothingPreset>
-  /** Unused at runtime; kept so existing overlays load. */
-  readonly revealCharsPerSec: number
-  /** Unused at runtime; kept so existing overlays load. */
-  readonly scrollSpeedPxPerSec: number
-  /** Unused at runtime; retained so existing overlays continue to load. */
-  readonly maxScrollSpeedPxPerSec: number
+  /** Whether this plugin takes over the assistant row for the reasoning box. */
+  readonly enabled: Volatile<boolean>
+  /** Whether the inline reasoning box follows its own stream while collapsed. */
+  readonly thinkAutoExpand: Volatile<boolean>
   /** Reasoning-translation backend and request limits (composition seed). */
   readonly translation: {
     readonly backend: 'bundle' | 'llm'
@@ -69,20 +57,6 @@ export interface Config {
     readonly timeoutMs: number
     readonly autoTranslate: boolean
   }
-  /** Whether this plugin owns conversation rendering. */
-  readonly enabled: Volatile<boolean>
-  /** Whether this plugin also owns conversation bottom-follow. */
-  readonly controlScroll: Volatile<boolean>
-  /** How the reveal honors the OS reduced-motion preference. */
-  readonly motionPreference: Volatile<StreamMotionPreference>
-  /** Whether a reasoning block follows while it is the streaming tail. */
-  readonly thinkAutoExpand: Volatile<boolean>
-  /** Logarithmic text fade for the answer and expanded thinking body. */
-  readonly logarithmicFade: Volatile<boolean>
-  /** Whether the live renderer diagnostics panel is enabled. */
-  readonly debugEnabled: Volatile<boolean>
-  /** Values edited by the diagnostics panel. */
-  readonly debugTuning: Volatile<StreamDebugTuning>
 }
 
 /** Symbol the Loader uses to commit a new volatile snapshot into a reference. */
@@ -114,28 +88,10 @@ function volatileField<T>(schema: Schema<T>): Schema<T> {
  */
 export type ConfigInput = Partial<StreamConfig>
 
-/**
- * Plugin configuration schema. Ordinary fields keep Cordis' load-time
- * validation; the preference fields are volatile, so profile-patch edits reach
- * the running plugin without re-activating it.
- */
+/** Plugin configuration schema. Both preferences live in the profile entry. */
 export const Config = Schema.object({
-  mode: Schema.union(['typewriter', 'teleprompter'] as const).default(DEFAULT_STREAM_CONFIG.mode),
-  preset: volatileField(
-    Schema.union(['realtime', 'balanced', 'silky'] as const).default(DEFAULT_STREAM_SETTINGS.preset),
-  ),
-  revealCharsPerSec: Schema.number()
-    .min(5)
-    .max(200)
-    .default(DEFAULT_STREAM_CONFIG.revealCharsPerSec),
-  scrollSpeedPxPerSec: Schema.number()
-    .min(1)
-    .max(200)
-    .default(DEFAULT_STREAM_CONFIG.scrollSpeedPxPerSec),
-  maxScrollSpeedPxPerSec: Schema.number()
-    .min(1)
-    .max(2000)
-    .default(DEFAULT_STREAM_CONFIG.maxScrollSpeedPxPerSec),
+  enabled: volatileField(Schema.boolean().default(DEFAULT_STREAM_SETTINGS.enabled)),
+  thinkAutoExpand: volatileField(Schema.boolean().default(DEFAULT_STREAM_SETTINGS.thinkAutoExpand)),
   translation: Schema.object({
     backend: Schema.union(['bundle', 'llm'] as const).default(DEFAULT_TRANSLATION_CONFIG.backend),
     provider: Schema.string().default(DEFAULT_TRANSLATION_CONFIG.provider),
@@ -147,27 +103,6 @@ export const Config = Schema.object({
     timeoutMs: Schema.number().min(1_000).max(600_000).default(DEFAULT_TRANSLATION_CONFIG.timeoutMs),
     autoTranslate: Schema.boolean().default(DEFAULT_TRANSLATION_CONFIG.autoTranslate),
   }).default(DEFAULT_TRANSLATION_CONFIG),
-  enabled: volatileField(Schema.boolean().default(DEFAULT_STREAM_SETTINGS.enabled)),
-  controlScroll: volatileField(Schema.boolean().default(DEFAULT_STREAM_SETTINGS.controlScroll)),
-  motionPreference: volatileField(Schema.union([
-    Schema.const('auto'),
-    Schema.const('force-smooth'),
-    Schema.const('force-reduced'),
-  ] as const).default(DEFAULT_STREAM_SETTINGS.motionPreference)),
-  thinkAutoExpand: volatileField(Schema.boolean().default(DEFAULT_STREAM_SETTINGS.thinkAutoExpand)),
-  logarithmicFade: volatileField(Schema.boolean().default(DEFAULT_STREAM_SETTINGS.logarithmicFade)),
-  debugEnabled: volatileField(Schema.boolean().default(DEFAULT_STREAM_SETTINGS.debugEnabled)),
-  debugTuning: volatileField(Schema.object({
-    revealScale: Schema.number().min(0.25).max(2).default(DEFAULT_STREAM_SETTINGS.debugTuning.revealScale),
-    queuePressure: Schema.number().min(0).max(2).default(DEFAULT_STREAM_SETTINGS.debugTuning.queuePressure),
-    maxRevealCps: Schema.number().min(120).max(1000).default(DEFAULT_STREAM_SETTINGS.debugTuning.maxRevealCps),
-    springStiffness: Schema.number().min(40).max(320).default(DEFAULT_STREAM_SETTINGS.debugTuning.springStiffness),
-    springDamping: Schema.number().min(8).max(80).default(DEFAULT_STREAM_SETTINGS.debugTuning.springDamping),
-    springMass: Schema.number().min(0.5).max(3).default(DEFAULT_STREAM_SETTINGS.debugTuning.springMass),
-    runwayPx: Schema.number().min(0).max(120).default(DEFAULT_STREAM_SETTINGS.debugTuning.runwayPx),
-    reserveResponseMs: Schema.number().min(60).max(600).default(DEFAULT_STREAM_SETTINGS.debugTuning.reserveResponseMs),
-    backpressureMinScale: Schema.number().min(0.25).max(1).default(DEFAULT_STREAM_SETTINGS.debugTuning.backpressureMinScale),
-  })),
 }) as unknown as Schema<ConfigInput, Config>
 
 /** One registered plugin entry as the config editor exposes it. */
@@ -220,13 +155,7 @@ function resolveConfigTarget(ctx: Context): ConfigTarget | undefined {
 function readSettings(config: Config): StreamSettings {
   return {
     enabled: config.enabled.get(),
-    controlScroll: config.controlScroll.get(),
-    preset: config.preset.get(),
-    motionPreference: config.motionPreference.get(),
     thinkAutoExpand: config.thinkAutoExpand.get(),
-    logarithmicFade: config.logarithmicFade.get(),
-    debugEnabled: config.debugEnabled.get(),
-    debugTuning: { ...config.debugTuning.get() },
   }
 }
 
@@ -240,10 +169,6 @@ function readSettings(config: Config): StreamSettings {
 function bootSnapshot(config: Config): StreamConfig {
   return {
     ...readSettings(config),
-    mode: config.mode,
-    revealCharsPerSec: config.revealCharsPerSec,
-    scrollSpeedPxPerSec: config.scrollSpeedPxPerSec,
-    maxScrollSpeedPxPerSec: config.maxScrollSpeedPxPerSec,
     translation: { ...config.translation },
   }
 }
@@ -257,104 +182,55 @@ type PatchResult =
  * Validate a partial settings patch and merge it over the live snapshot.
  * @param current - live preference snapshot.
  * @param payload - raw RPC payload.
- * @param extras - whether the payload may carry the diagnostics pair.
  * @returns the complete settings object to persist, or the rejection message.
  */
-function mergeSettingsPatch(current: StreamSettings, payload: unknown, extras: boolean): PatchResult {
+function mergeSettingsPatch(current: StreamSettings, payload: unknown): PatchResult {
   if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
     return { ok: false, message: 'settings payload must be an object' }
   }
   const next = payload as Partial<Record<keyof StreamSettings, unknown>>
-  if (typeof next.enabled !== 'boolean' || typeof next.controlScroll !== 'boolean' || typeof next.thinkAutoExpand !== 'boolean') {
-    return { ok: false, message: 'enabled, controlScroll and thinkAutoExpand must be booleans' }
+  if (next.enabled !== undefined && typeof next.enabled !== 'boolean') {
+    return { ok: false, message: 'enabled must be a boolean' }
   }
-  if (next.preset !== undefined && next.preset !== 'realtime' && next.preset !== 'balanced' && next.preset !== 'silky') {
-    return { ok: false, message: 'preset must be one of realtime | balanced | silky' }
-  }
-  if (next.motionPreference !== undefined
-    && next.motionPreference !== 'auto'
-    && next.motionPreference !== 'force-smooth'
-    && next.motionPreference !== 'force-reduced') {
-    return { ok: false, message: 'motionPreference must be one of auto | force-smooth | force-reduced' }
-  }
-  if (next.logarithmicFade !== undefined && typeof next.logarithmicFade !== 'boolean') {
-    return { ok: false, message: 'logarithmicFade must be a boolean' }
-  }
-  const hasDebug = next.debugEnabled !== undefined || next.debugTuning !== undefined
-  if (hasDebug) {
-    if (!extras) return { ok: false, message: 'debug settings are not accepted on this endpoint' }
-    if (typeof next.debugEnabled !== 'boolean' || !validDebugTuning(next.debugTuning)) {
-      return { ok: false, message: 'debugEnabled and debugTuning must be provided together and be valid' }
-    }
+  if (next.thinkAutoExpand !== undefined && typeof next.thinkAutoExpand !== 'boolean') {
+    return { ok: false, message: 'thinkAutoExpand must be a boolean' }
   }
   const merged: StreamSettings = {
-    ...current,
-    enabled: next.enabled,
-    controlScroll: next.controlScroll,
-    thinkAutoExpand: next.thinkAutoExpand,
-    ...(next.preset === undefined ? {} : { preset: next.preset }),
-    ...(next.motionPreference === undefined ? {} : { motionPreference: next.motionPreference }),
-    ...(next.logarithmicFade === undefined ? {} : { logarithmicFade: next.logarithmicFade }),
-    ...(hasDebug
-      ? { debugEnabled: next.debugEnabled as boolean, debugTuning: next.debugTuning as StreamDebugTuning }
-      : {}),
+    enabled: typeof next.enabled === 'boolean' ? next.enabled : current.enabled,
+    thinkAutoExpand: typeof next.thinkAutoExpand === 'boolean' ? next.thinkAutoExpand : current.thinkAutoExpand,
   }
   return { ok: true, settings: merged }
-}
-
-/** Whether a diagnostics tuning object matches the published bounds. */
-function validDebugTuning(value: unknown): value is StreamDebugTuning {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
-  const tuning = value as Record<string, unknown>
-  return typeof tuning.revealScale === 'number'
-    && tuning.revealScale >= 0.25 && tuning.revealScale <= 2
-    && typeof tuning.queuePressure === 'number'
-    && tuning.queuePressure >= 0 && tuning.queuePressure <= 2
-    && typeof tuning.maxRevealCps === 'number'
-    && tuning.maxRevealCps >= 120 && tuning.maxRevealCps <= 1000
-    && typeof tuning.springStiffness === 'number'
-    && tuning.springStiffness >= 40 && tuning.springStiffness <= 320
-    && typeof tuning.springDamping === 'number'
-    && tuning.springDamping >= 8 && tuning.springDamping <= 80
-    && typeof tuning.springMass === 'number'
-    && tuning.springMass >= 0.5 && tuning.springMass <= 3
-    && typeof tuning.runwayPx === 'number'
-    && tuning.runwayPx >= 0 && tuning.runwayPx <= 120
-    && typeof tuning.reserveResponseMs === 'number'
-    && tuning.reserveResponseMs >= 60 && tuning.reserveResponseMs <= 600
-    && typeof tuning.backpressureMinScale === 'number'
-    && tuning.backpressureMinScale >= 0.25 && tuning.backpressureMinScale <= 1
 }
 
 /** Commit every preference field into its volatile reference. */
 function writeSettingsRefs(config: Config, settings: StreamSettings): void {
   writeConfigRef(config.enabled, settings.enabled)
-  writeConfigRef(config.controlScroll, settings.controlScroll)
-  writeConfigRef(config.preset, settings.preset)
-  writeConfigRef(config.motionPreference, settings.motionPreference)
   writeConfigRef(config.thinkAutoExpand, settings.thinkAutoExpand)
-  writeConfigRef(config.logarithmicFade, settings.logarithmicFade)
-  writeConfigRef(config.debugEnabled, settings.debugEnabled)
-  writeConfigRef(config.debugTuning, { ...settings.debugTuning })
 }
 
 /**
  * Persist one complete preference snapshot into the owning profile entry.
  *
  * `configEditor.edit()` replaces the entry's whole config, so the callback
- * merges the inherited bundle layer and the current profile row before adding
- * this plugin's fields; otherwise composition seeds such as `translation`
- * would fall back to the schema defaults on the first card save.
+ * merges the inherited bundle layer and adds this plugin's fields explicitly.
+ * Only the current fields are written: the first save also drops legacy
+ * engine/preference keys an older row may still carry. The translation seed is
+ * taken from the current row, else the inherited bundle layer.
  * @param target - profile row plus editor.
  * @param settings - complete preference snapshot to persist.
  * @returns fulfillment after the Loader reconciled the profile patch.
  */
 async function persistSettings(target: ConfigTarget, settings: StreamSettings): Promise<void> {
-  await target.editor.edit(target.entry, (current, inherited) => ({
-    ...inherited,
-    ...current,
-    ...settings,
-  }))
+  await target.editor.edit(target.entry, (current, inherited) => {
+    const translation = current.translation ?? inherited.translation
+    const next: Record<string, unknown> = {
+      ...inherited,
+      enabled: settings.enabled,
+      thinkAutoExpand: settings.thinkAutoExpand,
+    }
+    if (translation !== undefined) next.translation = translation
+    return next
+  })
 }
 
 /**
@@ -368,9 +244,8 @@ async function persistSettings(target: ConfigTarget, settings: StreamSettings): 
  */
 export function apply(ctx: Context, config: Config): void {
   console.log(
-    `[dsh-think-box] plugin loaded! mode=${config.mode} preset=${readSettings(config).preset} `
-    + `seed=${config.revealCharsPerSec}cps scroll=${config.scrollSpeedPxPerSec}px/s `
-    + `maxScroll=${config.maxScrollSpeedPxPerSec}px/s `
+    `[dsh-think-box] plugin loaded! enabled=${String(config.enabled.get())} `
+    + `thinkAutoExpand=${String(config.thinkAutoExpand.get())} `
     + `translation=${config.translation.backend}`
     + (config.translation.backend === 'llm'
       ? ` route=${config.translation.provider}/${config.translation.model}`
@@ -419,28 +294,11 @@ export function apply(ctx: Context, config: Config): void {
   const view = (): StreamSettingsView => {
     const settings = readSettings(config)
     return {
-      version: '',
-      installation: 'unmanaged',
       writable: resolveConfigTarget(ctx) !== undefined,
       enabled: settings.enabled,
-      controlScroll: settings.controlScroll,
-      preset: settings.preset,
-      motionPreference: settings.motionPreference,
       thinkAutoExpand: settings.thinkAutoExpand,
-      logarithmicFade: settings.logarithmicFade,
-      canUpgrade: false,
     }
   }
-
-  /** The diagnostics view; the tuning object is a detached copy. */
-  const debugView = (): StreamDebugSettingsView => {
-    const settings = readSettings(config)
-    return {
-      debugEnabled: settings.debugEnabled,
-      tuning: { ...settings.debugTuning },
-    }
-  }
-
 
   /** Reject a write when this deployment cannot persist profile config. */
   const readOnly = <T>(): T => ({
@@ -457,7 +315,7 @@ export function apply(ctx: Context, config: Config): void {
     if (endpoint === STREAM_SETTINGS_RPC.write) {
       const target = resolveConfigTarget(ctx)
       if (target === undefined) return readOnly()
-      const merged = mergeSettingsPatch(readSettings(config), payload, true)
+      const merged = mergeSettingsPatch(readSettings(config), payload)
       if (!merged.ok) {
         return { ok: false, error: { code: 'settings-rejected', message: merged.message, details: { ns: STREAM_SETTINGS_NS } } }
       }
@@ -478,36 +336,6 @@ export function apply(ctx: Context, config: Config): void {
       // reconcile returns before the reference update lands.
       writeSettingsRefs(config, merged.settings)
       return { ok: true, value: view() }
-    }
-    if (endpoint === STREAM_SETTINGS_RPC.debugRead) return { ok: true, value: debugView() }
-    if (endpoint === STREAM_SETTINGS_RPC.debugWrite) {
-      const target = resolveConfigTarget(ctx)
-      if (target === undefined) return readOnly()
-      const current = readSettings(config)
-      const merged = mergeSettingsPatch(current, {
-        enabled: current.enabled,
-        controlScroll: current.controlScroll,
-        thinkAutoExpand: current.thinkAutoExpand,
-        debugEnabled: (payload as { debugEnabled?: unknown }).debugEnabled,
-        debugTuning: (payload as { tuning?: unknown }).tuning,
-      }, true)
-      if (!merged.ok) {
-        return { ok: false, error: { code: 'settings-rejected', message: merged.message, details: { ns: STREAM_SETTINGS_NS } } }
-      }
-      try {
-        await persistSettings(target, merged.settings)
-      } catch {
-        return {
-          ok: false,
-          error: {
-            code: 'settings-rejected',
-            message: 'smooth-stream debug settings could not be saved to the profile',
-            details: { ns: STREAM_SETTINGS_NS },
-          },
-        }
-      }
-      writeSettingsRefs(config, merged.settings)
-      return { ok: true, value: debugView() }
     }
     return { ok: false, error: { code: 'internal', message: `unknown smooth-stream endpoint ${JSON.stringify(endpoint)}`, details: {} } }
   }

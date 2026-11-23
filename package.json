@@ -70,7 +70,6 @@
     }
   },
   "scripts": {
-    "benchmark": "node scripts/run-stream-benchmark.mjs",
     "build": "tsdown",
     "dev:watch": "tsdown --watch",
     "host:sync": "pnpm build && node scripts/check-lib-fresh.mjs",

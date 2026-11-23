@@ -1,11 +1,14 @@
 /**
- * Shared plugin configuration contract. The Host half defines the
- * Schemastery schema over this shape (defaults live here so both halves stay
- * symmetric); the client half falls back to the same defaults when the Host
- * boot-config bridge is absent (client-only composition).
+ * Shared plugin configuration contract.
+ *
+ * The Host half defines the Schemastery schema over this shape (defaults live
+ * here so both halves stay symmetric); the client half falls back to the same
+ * defaults when the Host boot-config bridge is absent (client-only
+ * composition). Only the boot snapshot lives here: the live preferences are
+ * volatile fields on the Host schema, and translation is a composition seed.
  */
 
-import { DEFAULT_STREAM_SETTINGS, type StreamSettings } from './settings.ts'
+import { DEFAULT_STREAM_SETTINGS } from './settings.ts'
 
 /**
  * Read-only reference for one volatile config field. Cordis replaces the plain
@@ -27,9 +30,6 @@ export interface Volatile<T> {
  * own configuration slot, so those three must agree.
  */
 export const STREAM_PACKAGE_ID = '@local/dsh-think-box'
-
-/** Legacy render-mode value retained so existing overlays remain valid. */
-export type StreamMode = 'typewriter' | 'teleprompter'
 
 /** Which host service translates the reasoning box. */
 export type TranslationBackend = 'bundle' | 'llm'
@@ -80,41 +80,23 @@ export const DEFAULT_TRANSLATION_CONFIG: TranslationConfig = {
 }
 
 /**
- * Plugin configuration validated by the Host schema and bridged to the browser
- * half.
+ * JSON-safe configuration the Host bridges to the browser half on boot.
  *
- * The user-editable preferences live in the SAME profile entry config from
- * 0.2.x on (the Loader persists them through `configEditor`), so the browser
- * boot snapshot is just the whole resolved config. `preset` is declared once,
- * by {@link StreamSettings}: since 0.2.x it is both the install-time default
- * and the live user pick.
+ * The live preferences are read from their volatile references at injection
+ * time, so this object only ever contains plain values.
  */
-export interface StreamConfig extends StreamSettings {
-  /** Compatibility field; both values use the current adaptive reveal engine. */
-  readonly mode: StreamMode
-  /**
-   * Unused at runtime; kept so existing overlays load. Live reveal tracks
-   * observed arrival and ignores this seed.
-   */
-  readonly revealCharsPerSec: number
-  /**
-   * Unused at runtime; kept so existing overlays load. Follow is a
-   * smooth-damp, not a cruise speed.
-   */
-  readonly scrollSpeedPxPerSec: number
-  /** Unused at runtime; retained so existing overlays continue to load. */
-  readonly maxScrollSpeedPxPerSec: number
-  /** Reasoning-translation backend and request limits. */
+export interface StreamConfig {
+  /** Whether this plugin takes over the assistant row. */
+  readonly enabled: boolean
+  /** Whether the inline reasoning box follows its own stream. */
+  readonly thinkAutoExpand: boolean
+  /** Reasoning-translation backend and request limits (composition seed). */
   readonly translation: TranslationConfig
 }
 
 /** Defaults shared by the Host schema and the client-side fallback. */
 export const DEFAULT_STREAM_CONFIG: StreamConfig = {
   ...DEFAULT_STREAM_SETTINGS,
-  mode: 'typewriter',
-  revealCharsPerSec: 80,
-  scrollSpeedPxPerSec: 48,
-  maxScrollSpeedPxPerSec: 1000,
   translation: DEFAULT_TRANSLATION_CONFIG,
 }
 

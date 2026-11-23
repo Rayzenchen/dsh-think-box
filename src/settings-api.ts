@@ -7,45 +7,14 @@ export const STREAM_SETTINGS_RPC_CHANNEL = '/smooth-stream'
 export const STREAM_SETTINGS_RPC = {
   read: 'settings.read',
   write: 'settings.write',
-  debugRead: 'debug.read',
-  debugWrite: 'debug.write',
-  upgrade: 'plugin.upgrade',
 } as const
-
-/** How the active profile supplied this plugin. */
-export type StreamInstallationKind = 'npm' | 'development' | 'unmanaged'
 
 /** Redacted, plugin-owned configuration state returned to the browser. */
 export interface StreamSettingsView {
-  /** Version of the package currently running in the Host process. */
-  version: string
-  /** Source class of this package in the active profile. */
-  installation: StreamInstallationKind
   /** Whether the Host settings provider permits a write. */
   writable: boolean
-  /** Whether smooth-stream currently owns conversation rendering. */
+  /** Whether this plugin owns the assistant row. */
   enabled: boolean
-  /** Whether smooth-stream also owns conversation bottom-follow. */
-  controlScroll: boolean
-  /** Smoothing preset for the reveal cadence and follow physics. */
-  preset: import('./settings.ts').StreamSmoothingPreset
-  /** How the reveal honors the OS reduced-motion preference. */
-  motionPreference: import('./settings.ts').StreamMotionPreference
-  /** Current resolved preference. */
+  /** Whether the inline reasoning box follows its own stream. */
   thinkAutoExpand: boolean
-  /** Whether new answer/thinking text fades into its original color. */
-  logarithmicFade: boolean
-  /** Whether a fixed npm update command is safe to offer. */
-  canUpgrade: boolean
-}
-
-/** Debug-only settings returned by the diagnostics RPC. */
-export interface StreamDebugSettingsView {
-  debugEnabled: boolean
-  tuning: import('./settings.ts').StreamDebugTuning
-}
-
-/** Successful package update acknowledgement; loading the new code needs a restart. */
-export interface StreamUpgradeView {
-  restartRequired: true
 }

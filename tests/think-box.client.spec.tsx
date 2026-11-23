@@ -51,6 +51,56 @@ function assistantProps(
 
 const REASONING = { kind: 'reasoning', text: 'first line\nlatest tokens' }
 
+describe('boot snapshot', () => {
+  async function registeredContainer(props: Parameters<typeof TypewriterAssistantNodeView>[0]): Promise<HTMLElement> {
+    const ctx = new Context()
+    await ctx.plugin(SlotRegistry).await()
+    ctx.slots.register({
+      name: 'root',
+      children: { 'conversation.chat.node': { kind: 'keyed', scope: 'session' } },
+    } as never, (() => null) as never)
+    const fiber = ctx.plugin({ inject: [...inject], apply })
+    await fiber.await()
+    const component = ctx.slots.entries('conversation.chat.node')[0]?.component
+    expect(component).toBeTypeOf('function')
+    const view = render(createElement(component as never, props))
+    await fiber.dispose()
+    return view.container
+  }
+
+  it('ignores extra fields from an older Host boot snapshot', async () => {
+    ;(globalThis as Record<string, unknown>)[STREAM_BOOT_GLOBAL] = {
+      enabled: true,
+      thinkAutoExpand: true,
+      translation: DEFAULT_STREAM_CONFIG.translation,
+      mode: 'typewriter',
+      preset: 'silky',
+      controlScroll: false,
+      debugEnabled: true,
+    }
+    const container = await registeredContainer(assistantProps('running', [REASONING]))
+    expect(container.querySelector('[data-variant="think"]')).not.toBeNull()
+  })
+
+  it('uses defaults when the boot snapshot predates the two preferences', async () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {})
+    ;(globalThis as Record<string, unknown>)[STREAM_BOOT_GLOBAL] = { mode: 'typewriter', preset: 'balanced' }
+    try {
+      const container = await registeredContainer(assistantProps('running', [REASONING]))
+      expect(container.querySelector('[data-variant="think"]')).not.toBeNull()
+      expect(info).toHaveBeenCalledWith(expect.stringContaining('predates the preference snapshot'))
+    } finally {
+      info.mockRestore()
+    }
+  })
+
+  it('fails loudly when a preference is present but malformed', async () => {
+    ;(globalThis as Record<string, unknown>)[STREAM_BOOT_GLOBAL] = { enabled: 'yes', thinkAutoExpand: true }
+    await expect(registeredContainer(assistantProps('running', [REASONING])))
+      .rejects.toThrow(/malformed/)
+  })
+})
+
 describe('reasoning box', () => {
   it('renders the inline preview while reasoning streams', () => {
     const view = render(createElement(TypewriterAssistantNodeView, assistantProps('running', [REASONING])))

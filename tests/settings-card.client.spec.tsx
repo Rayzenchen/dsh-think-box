@@ -1,8 +1,7 @@
 /** The browser half uses the plugin-owned RPC instead of core settings.describe. */
 
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { useSyncExternalStore } from 'react'
+import { cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { Context } from '@deepseek-ai/cordis'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-runtime/client'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
@@ -14,43 +13,31 @@ import { en } from '../src/client/locales.ts'
 import {
   STREAM_SETTINGS_RPC,
   STREAM_SETTINGS_RPC_CHANNEL,
-  type StreamDebugSettingsView,
   type StreamSettingsView,
 } from '../src/settings-api.ts'
-import { DEFAULT_STREAM_DEBUG_TUNING } from '../src/settings.ts'
+import { TRANSLATION_RPC, TRANSLATION_RPC_CHANNEL } from '../src/translation-protocol.ts'
+import { DEFAULT_TRANSLATION_CONFIG, type TranslationConfig } from '../src/config.ts'
 
 afterEach(() => {
   cleanup()
+  vi.unstubAllGlobals()
 })
 
-const developmentView: StreamSettingsView = {
-  version: '0.1.0',
-  installation: 'development',
-    writable: true,
-    enabled: true,
-    controlScroll: true,
-    preset: 'silky',
-    motionPreference: 'auto',
-    thinkAutoExpand: true,
-    logarithmicFade: true,
-  canUpgrade: false,
-}
-
-const developmentDebugView: StreamDebugSettingsView = {
-  debugEnabled: false,
-  tuning: DEFAULT_STREAM_DEBUG_TUNING,
+const readyView: StreamSettingsView = {
+  writable: true,
+  enabled: true,
+  thinkAutoExpand: true,
 }
 
 interface BenchOptions {
   view?: StreamSettingsView
   readValue?: unknown
-  debugView?: StreamDebugSettingsView
   failRead?: boolean
   readGate?: Promise<void>
   writeGate?: Promise<void>
-  failDebugWrite?: boolean
   failWrite?: boolean
-  debugReadGate?: Promise<void>
+  translation?: Partial<TranslationConfig>
+  failTranslationRead?: boolean
 }
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
@@ -63,605 +50,248 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
 async function bench(options: BenchOptions = {}): Promise<{
   ctx: Context
   slots: SlotRegistry
-  coreDescribe: ReturnType<typeof vi.fn>
   call: ReturnType<typeof vi.fn>
+  view: () => StreamSettingsView
+  setView: (next: StreamSettingsView) => void
   removeConnection: () => void
-  setDebugView: (next: StreamDebugSettingsView) => void
 }> {
   const ctx = new Context()
   await ctx.plugin(SlotRegistry).await()
   const locale = new LocaleRuntime(ctx)
   ctx.provide('locale', locale)
 
-  let view = options.view ?? developmentView
-  let debugView = options.debugView ?? developmentDebugView
-  let debugReadCount = 0
-  const coreDescribe = vi.fn(() => Promise.resolve({
-    rpcId: 'settings',
-    result: { ok: false, error: { code: 'settings-not-exposed' } },
-  }))
+  let view = options.view ?? readyView
+  let translation: TranslationConfig = {
+    ...DEFAULT_TRANSLATION_CONFIG,
+    autoTranslate: false,
+    ...options.translation,
+  }
   const call = vi.fn(async (channel: string, endpoint: string, payload: unknown) => {
-    if (channel !== STREAM_SETTINGS_RPC_CHANNEL) {
-      return { ok: false as const, error: { code: 'internal', message: 'unexpected channel' } }
+    if (channel === STREAM_SETTINGS_RPC_CHANNEL) {
+      if (endpoint === STREAM_SETTINGS_RPC.read) {
+        if (options.failRead === true) throw new Error('RPC unavailable')
+        await options.readGate
+        return { ok: true as const, value: options.readValue ?? view }
+      }
+      if (endpoint === STREAM_SETTINGS_RPC.write) {
+        const settings = payload as { enabled?: unknown, thinkAutoExpand?: unknown }
+        if (typeof settings.enabled !== 'boolean' || typeof settings.thinkAutoExpand !== 'boolean') {
+          return { ok: false as const, error: { code: 'internal', message: 'bad payload' } }
+        }
+        if (options.failWrite === true) {
+          return { ok: false as const, error: { code: 'settings-rejected', message: 'write failed' } }
+        }
+        await options.writeGate
+        view = { ...view, enabled: settings.enabled, thinkAutoExpand: settings.thinkAutoExpand }
+        return { ok: true as const, value: view }
+      }
+      return { ok: false as const, error: { code: 'internal', message: 'unknown endpoint' } }
     }
-    if (endpoint === STREAM_SETTINGS_RPC.read) {
-      if (options.failRead === true) throw new Error('RPC unavailable')
-      await options.readGate
-      return { ok: true as const, value: options.readValue ?? view }
+    if (channel === TRANSLATION_RPC_CHANNEL) {
+      if (endpoint === TRANSLATION_RPC.settingsRead) {
+        if (options.failTranslationRead === true) throw new Error('translation RPC unavailable')
+        return { ok: true as const, value: translation }
+      }
+      if (endpoint === TRANSLATION_RPC.settingsWrite) {
+        translation = { ...translation, ...(payload as Partial<TranslationConfig>) }
+        return { ok: true as const, value: translation }
+      }
     }
-    if (endpoint === STREAM_SETTINGS_RPC.write) {
-      const settings = payload as {
-        enabled?: unknown
-        thinkAutoExpand?: unknown
-        logarithmicFade?: boolean
-        debugEnabled?: unknown
-        debugTuning?: unknown
-      }
-      if (typeof settings.enabled !== 'boolean' || typeof settings.thinkAutoExpand !== 'boolean') {
-        return { ok: false as const, error: { code: 'internal', message: 'bad payload' } }
-      }
-      if (options.failWrite === true) {
-        return { ok: false as const, error: { code: 'settings-rejected', message: 'write failed' } }
-      }
-      await options.writeGate
-      view = {
-        ...view,
-        enabled: settings.enabled,
-        thinkAutoExpand: settings.thinkAutoExpand,
-        logarithmicFade: settings.logarithmicFade ?? view.logarithmicFade,
-      }
-      if (typeof settings.debugEnabled === 'boolean' && typeof settings.debugTuning === 'object' && settings.debugTuning !== null) {
-        debugView = { debugEnabled: settings.debugEnabled, tuning: settings.debugTuning as StreamDebugSettingsView['tuning'] }
-      }
-      return { ok: true as const, value: view }
-    }
-    if (endpoint === STREAM_SETTINGS_RPC.debugRead) {
-      const readNumber = debugReadCount++
-      const response = debugView
-      if (readNumber === 0) await options.debugReadGate
-      return { ok: true as const, value: response }
-    }
-    if (endpoint === STREAM_SETTINGS_RPC.debugWrite) {
-      const settings = payload as { debugEnabled?: unknown; tuning?: unknown }
-      if (typeof settings.debugEnabled !== 'boolean'
-        || typeof settings.tuning !== 'object' || settings.tuning === null) {
-        return { ok: false as const, error: { code: 'internal', message: 'bad debug payload' } }
-      }
-      if (options.failDebugWrite === true) {
-        return { ok: false as const, error: { code: 'settings-rejected', message: 'write failed' } }
-      }
-      debugView = {
-        debugEnabled: settings.debugEnabled,
-        tuning: settings.tuning as StreamDebugSettingsView['tuning'],
-      }
-      return { ok: true as const, value: debugView }
-    }
-    if (endpoint === STREAM_SETTINGS_RPC.upgrade) return { ok: true as const, value: { restartRequired: true } }
-    return { ok: false as const, error: { code: 'internal', message: 'unexpected endpoint' } }
+    return { ok: false as const, error: { code: 'internal', message: 'unexpected channel' } }
   })
-  const removeConnection = ctx.provide('connection', {
-    api: { settings: { describe: coreDescribe } },
-    rpc: { call },
-  } as never)
-
+  const removeConnection = ctx.provide('connection', { rpc: { call } } as never)
   return {
     ctx,
     slots: ctx.get('slots') as SlotRegistry,
-    coreDescribe,
     call,
+    view: () => view,
+    setView: (next) => { view = next },
     removeConnection,
-    setDebugView: (next: StreamDebugSettingsView) => { debugView = next },
   }
 }
 
 function declareCardSlot(slots: SlotRegistry): () => void {
   return slots.register({
     name: 'root',
-    children: { 'settings.plugin.item': { kind: 'list', scope: 'root' } },
+    children: {
+      'plugins.bundle.config': { kind: 'keyed', scope: 'root' },
+      'conversation.chat.node': { kind: 'keyed', scope: 'session' },
+    },
   } as never, () => null)
 }
 
 function cardFace(slots: SlotRegistry): SmoothStreamCardFace {
-  const entry = slots.entries('settings.plugin.item')[0]
-  if (entry === undefined) throw new Error('smooth-stream card was not registered')
+  const entry = slots.entries('plugins.bundle.config' as never)
+    .find(item => item.options.key === '@local/dsh-think-box')
+  if (entry === undefined) throw new Error('settings card was not registered')
   return (entry.inject as unknown as () => SmoothStreamCardFace)()
 }
 
-/**
- * The card header's accessible name is the dictionary title. The fork renamed
- * it in 8446a72 ("Reasoning display enhancement", locales.ts), so the query
- * follows the dictionary instead of the upstream literal, which had gone stale.
- */
 const cardTitle = new RegExp(en.title, 'i')
 
 function cardProps(face: SmoothStreamCardFace): SmoothStreamCardProps {
   return {
     ...face,
     t: (key: keyof typeof en) => en[key],
+    // The real slot helpers are React hook adapters; mirror them with
+    // useSyncExternalStore so edits re-render the card.
     useSmoothStreamCard: (selector: (state: ReturnType<typeof face.hooks.smoothStreamCard.getSnapshot>) => unknown) => (
-      selector(face.hooks.smoothStreamCard.getSnapshot())
+      selector(useSyncExternalStore(
+        face.hooks.smoothStreamCard.subscribe,
+        face.hooks.smoothStreamCard.getSnapshot,
+        face.hooks.smoothStreamCard.getSnapshot,
+      ))
     ),
-    // ddfa378 unified the translation card under its own store: the renderer
-    // reads a second hook (`props.useTranslationCard`) next to the smooth
-    // stream one, so the test face must expose both, exactly as the seat does.
     useTranslationCard: (selector: (state: ReturnType<typeof face.hooks.translationCard.getSnapshot>) => unknown) => (
-      selector(face.hooks.translationCard.getSnapshot())
+      selector(useSyncExternalStore(
+        face.hooks.translationCard.subscribe,
+        face.hooks.translationCard.getSnapshot,
+        face.hooks.translationCard.getSnapshot,
+      ))
     ),
   } as unknown as SmoothStreamCardProps
 }
 
-describe('smooth-stream settings card', () => {
-  it('defaults old responses to fade enabled and saves the independent switch', async () => {
-    const { logarithmicFade: _fade, ...oldView } = developmentView
-    const { ctx, slots, call } = await bench({ readValue: oldView })
-    declareCardSlot(slots)
-    await ctx.plugin({ inject: [...inject], apply }).await()
-    const face = cardFace(slots)
-    await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot().status).toBe('ready'))
-    expect(face.hooks.smoothStreamCard.getSnapshot().logarithmicFade).toBe(true)
-    render(<SmoothStreamCard {...cardProps(face)} />)
-    fireEvent.click(screen.getByRole('button', { name: cardTitle }))
-    fireEvent.click(screen.getByRole('checkbox', { name: /logarithmic fade/i }))
-    expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({ logarithmicFade: false, dirty: true })
-    face.save()
-    await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({ logarithmicFade: false, dirty: false }))
-    expect(call).toHaveBeenCalledWith(STREAM_SETTINGS_RPC_CHANNEL, STREAM_SETTINGS_RPC.write, expect.objectContaining({ logarithmicFade: false }))
+async function renderCard(options: BenchOptions = {}): Promise<{
+  face: SmoothStreamCardFace
+  view: () => StreamSettingsView
+  screen: ReturnType<typeof render>
+  bench: Awaited<ReturnType<typeof bench>>
+}> {
+  const harness = await bench(options)
+  declareCardSlot(harness.slots)
+  const fiber = harness.ctx.plugin({ inject: [...inject], apply })
+  await fiber.await()
+  const face = cardFace(harness.slots)
+  await waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot().status)
+    .toBe(options.failRead === true ? 'unavailable' : 'ready'))
+  const view = render(<SmoothStreamCard {...cardProps(face)} />)
+  fireEvent.click(view.getByRole('button', { name: cardTitle }))
+  return { face, view: harness.view, screen: view, bench: harness }
+}
+
+describe('reasoning settings card', () => {
+  it('renders the three sections and no removed controls', async () => {
+    const { screen } = await renderCard()
+    expect(screen.getByText(en.enabled)).toBeTruthy()
+    expect(screen.getByText(en.thinkAutoExpand)).toBeTruthy()
+    expect(screen.getByText(en.translationTitle)).toBeTruthy()
+    // Version, update, presets, scroll/fade and diagnostics are gone.
+    expect(screen.queryByText(/preset|silky|realtime/i)).toBeNull()
+    expect(screen.queryByText(en.translationBackend)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /update/i })).toBeNull()
   })
 
-  it('rejects a non-boolean fade response', async () => {
-    const { ctx, slots } = await bench({ readValue: { ...developmentView, logarithmicFade: 'false' } })
-    declareCardSlot(slots)
-    await ctx.plugin({ inject: [...inject], apply }).await()
-    const face = cardFace(slots)
-    await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot().status).toBe('unavailable'))
-  })
-  it('uses the standard theme-aware card surface tokens', () => {
-    const styles = readFileSync(join(process.cwd(), 'src/client/SmoothStreamCard.module.css'), 'utf8')
-
-    expect(styles).toContain('border: 1px solid var(--dsw-alias-border-l2)')
-    expect(styles).toContain('background: var(--dsw-alias-bg-layer-3)')
-    expect(styles).toContain('background: var(--dsw-alias-bg-layer-2)')
-    expect(styles).not.toMatch(/--dsw-alias-(?:border-base|bg-base|bg-hover|accent)\b/)
-  })
-
-  it('declares only the slots service (settings surface is optional)', () => {
-    expect(inject).toEqual(['slots'])
-  })
-
-  it('registers the namespace as the keyed slot key for the configurable tab', async () => {
-    const { ctx, slots } = await bench()
-    slots.register({
-      name: 'root',
-      children: { 'settings.plugin.item': { kind: 'keyed', scope: 'root' } },
-    } as never, () => null)
-    await ctx.plugin({ inject: [...inject], apply }).await()
-
-    expect(slots.entries('settings.plugin.item').map(entry => entry.options.key))
-      .toEqual(['smooth-stream'])
-  })
-
-  it('registers the card once the plugin-item slot is declared', async () => {
-    const { ctx, slots } = await bench()
-    declareCardSlot(slots)
-    await ctx.plugin({ inject: [...inject], apply }).await()
-
-    expect(slots.entries('settings.plugin.item').map(entry => ({
-      id: entry.options.id,
-      key: entry.options.key,
-    }))).toEqual([{ id: 'smooth-stream', key: 'smooth-stream' }])
-  })
-
-  it('keeps the plugin entry visible when the core settings API filters third-party namespaces', async () => {
-    const { ctx, slots, coreDescribe, call } = await bench({
-      view: { ...developmentView, thinkAutoExpand: false },
-    })
-    declareCardSlot(slots)
-    await ctx.plugin({ inject: [...inject], apply }).await()
-
-    const face = cardFace(slots)
-    await vi.waitFor(() => {
-      expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({
-        status: 'ready',
-        thinkAutoExpand: false,
-      })
-    })
-    render(<SmoothStreamCard {...cardProps(face)} />)
-
-    expect(screen.getByText(en.title)).toBeTruthy()
-    expect(call).toHaveBeenCalledWith(STREAM_SETTINGS_RPC_CHANNEL, STREAM_SETTINGS_RPC.read, {})
-    expect(coreDescribe).not.toHaveBeenCalled()
-  })
-
-  it('rejects a settings response whose control-scroll flag is malformed', async () => {
-    const { ctx, slots } = await bench({
-      readValue: { ...developmentView, controlScroll: 'true' },
-    })
-    declareCardSlot(slots)
-    await ctx.plugin({ inject: [...inject], apply }).await()
-
-    const face = cardFace(slots)
-    await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot().status).toBe('unavailable'))
-  })
-
-  it('labels a link installation as a development version and disables its update action', async () => {
-    const { ctx, slots } = await bench()
-    declareCardSlot(slots)
-    await ctx.plugin({ inject: [...inject], apply }).await()
-    const face = cardFace(slots)
-    await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot().status).toBe('ready'))
-    render(<SmoothStreamCard {...cardProps(face)} />)
-
-    fireEvent.click(screen.getByRole('button', { name: cardTitle }))
-    expect(screen.getByText('Development version 0.1.0')).toBeTruthy()
-    expect(screen.getByRole('button', { name: en.update }).getAttribute('disabled')).not.toBeNull()
-  })
-
-  it('writes staged changes through the plugin-owned settings RPC', async () => {
-    const { ctx, slots, call } = await bench()
-    declareCardSlot(slots)
-    await ctx.plugin({ inject: [...inject], apply }).await()
-    const face = cardFace(slots)
-    await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot().status).toBe('ready'))
-
-    face.edit({ thinkAutoExpand: false })
-    expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({ dirty: true, thinkAutoExpand: false })
-    face.save()
-    await vi.waitFor(() => {
-      expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({
-        dirty: false,
-        thinkAutoExpand: false,
-      })
-    })
-    expect(call).toHaveBeenCalledWith(STREAM_SETTINGS_RPC_CHANNEL, STREAM_SETTINGS_RPC.write, {
-      enabled: true,
-      controlScroll: true,
-      motionPreference: 'auto',
-      // ddfa378: the persisted payload carries the resolved preset too.
-      preset: 'silky',
-      thinkAutoExpand: false,
-      logarithmicFade: true,
-    })
-  })
-
-  it('stages a motion-preference pick from the radio group without nested labels', async () => {
-    const { ctx, slots } = await bench()
-    declareCardSlot(slots)
-    await ctx.plugin({ inject: [...inject], apply }).await()
-    const face = cardFace(slots)
-    await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot().status).toBe('ready'))
-    render(<SmoothStreamCard {...cardProps(face)} />)
-
-    fireEvent.click(screen.getByRole('button', { name: cardTitle }))
-    // ddfa378 added the translation card's own radio group to the same body,
-    // so the motion-preference assertions must scope to their group instead of
-    // counting every radio on the page (3 motion + 3 translation radios).
-    const motionGroup = screen.getByRole('radiogroup', { name: en.motionPreference })
-    const radios = within(motionGroup).getAllByRole('radio')
-    expect(radios).toHaveLength(3)
-    expect(radios.map(radio => (radio as HTMLInputElement).checked)).toEqual([true, false, false])
-    fireEvent.click(radios[1]!)
-    expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({
-      dirty: true,
-      motionPreference: 'force-smooth',
-    })
-    // The pick's <label> must not sit inside another <label>: browsers route
-    // the inner click away from React's synthetic events in that shape, so
-    // onChange would never fire. Its nearest label ancestor is itself.
-    const choiceLabel = radios[1]!.closest('label')
-    expect(choiceLabel).not.toBeNull()
-    expect(choiceLabel!.parentElement!.closest('label')).toBeNull()
-  })
-
-  it('stages and persists the diagnostics switch through its compatible endpoint', async () => {
-    const { ctx, slots, call } = await bench()
-    declareCardSlot(slots)
-    await ctx.plugin({ inject: [...inject], apply }).await()
-    const face = cardFace(slots)
-    await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({
-      status: 'ready',
-      debugAvailable: true,
-    }))
-
-    face.edit({ debugEnabled: true })
-    expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({ dirty: true, debugEnabled: true })
-    face.save()
-    await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({
-      dirty: false,
-      debugEnabled: true,
-    }))
-    expect(call).toHaveBeenCalledWith(STREAM_SETTINGS_RPC_CHANNEL, STREAM_SETTINGS_RPC.debugWrite, {
-      debugEnabled: true,
-      tuning: DEFAULT_STREAM_DEBUG_TUNING,
-    })
-  })
-
-  it('saves base and diagnostics settings through one atomic settings write', async () => {
-    const { ctx, slots, call } = await bench()
-    declareCardSlot(slots)
-    await ctx.plugin({ inject: [...inject], apply }).await()
-    const face = cardFace(slots)
-    await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({
-      status: 'ready',
-      debugAvailable: true,
-    }))
-
-    const tuning = { ...DEFAULT_STREAM_DEBUG_TUNING, springDamping: 31 }
-    face.edit({ enabled: false, debugEnabled: true, debugTuning: tuning })
-    face.save()
-    await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({
-      dirty: false,
-      enabled: false,
-      debugEnabled: true,
-      debugTuning: { springDamping: 31 },
-    }))
-
-    expect(call).toHaveBeenCalledWith(STREAM_SETTINGS_RPC_CHANNEL, STREAM_SETTINGS_RPC.write, {
-      enabled: false,
-      controlScroll: true,
-      motionPreference: 'auto',
-      // ddfa378: the persisted payload carries the resolved preset too.
-      preset: 'silky',
-      thinkAutoExpand: true,
-      logarithmicFade: true,
-      debugEnabled: true,
-      debugTuning: tuning,
-    })
-    expect(call).not.toHaveBeenCalledWith(STREAM_SETTINGS_RPC_CHANNEL, STREAM_SETTINGS_RPC.debugWrite, expect.anything())
-  })
-
-  it('keeps both staged setting groups after an atomic save failure', async () => {
-    const { ctx, slots } = await bench({ failWrite: true })
-    declareCardSlot(slots)
-    await ctx.plugin({ inject: [...inject], apply }).await()
-    const face = cardFace(slots)
-    await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({
-      status: 'ready',
-      debugAvailable: true,
-    }))
-
-    face.edit({ enabled: false, debugEnabled: true })
-    face.save()
-    await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({
-      dirty: true,
-      failed: true,
-      enabled: false,
-      debugEnabled: true,
-    }))
-    face.discard()
-    expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({
-      dirty: false,
-      failed: false,
-      enabled: true,
-      debugEnabled: false,
-    })
-  })
-
-  it('ignores a stale debug read after a settings reload', async () => {
-    const debugRead = deferred()
-    const { ctx, slots, call, setDebugView } = await bench({
-      debugView: developmentDebugView,
-      debugReadGate: debugRead.promise,
-    })
-    declareCardSlot(slots)
-    await ctx.plugin({ inject: [...inject], apply }).await()
-    const face = cardFace(slots)
-    await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot().status).toBe('ready'))
-    await vi.waitFor(() => expect(call).toHaveBeenCalledWith(STREAM_SETTINGS_RPC_CHANNEL, STREAM_SETTINGS_RPC.debugRead, {}))
-
-    setDebugView({
-      debugEnabled: true,
-      tuning: { ...DEFAULT_STREAM_DEBUG_TUNING, springDamping: 31 },
-    })
-    face.reload()
-    await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({
-      status: 'ready',
-      debugAvailable: true,
-    }))
-    debugRead.resolve()
-    await debugRead.promise
-    await Promise.resolve()
-    expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({
-      debugEnabled: true,
-      debugTuning: { springDamping: 31 },
-    })
-  })
-
-  it('retains staged diagnostics after a failed save so they can be retried or discarded', async () => {
-    const { ctx, slots } = await bench({ failDebugWrite: true })
-    declareCardSlot(slots)
-    await ctx.plugin({ inject: [...inject], apply }).await()
-    const face = cardFace(slots)
-    await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({
-      status: 'ready',
-      debugAvailable: true,
-    }))
-
-    face.edit({
-      debugEnabled: true,
-      debugTuning: { ...DEFAULT_STREAM_DEBUG_TUNING, springDamping: 31 },
-    })
-    face.save()
-    await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({
-      dirty: true,
-      failed: true,
-      debugEnabled: true,
-      debugTuning: { springDamping: 31 },
-    }))
-
-    face.discard()
-    expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({
-      dirty: false,
-      failed: false,
-      debugEnabled: false,
-      debugTuning: { springDamping: DEFAULT_STREAM_DEBUG_TUNING.springDamping },
-    })
-  })
-
-  it('shows a master toggle and disables its dependent preference when off', async () => {
-    const { ctx, slots } = await bench({ view: { ...developmentView, enabled: false } })
-    declareCardSlot(slots)
-    await ctx.plugin({ inject: [...inject], apply }).await()
-    const face = cardFace(slots)
-    await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot().status).toBe('ready'))
-    const card = render(<SmoothStreamCard {...cardProps(face)} />)
-
-    fireEvent.click(screen.getByRole('button', { name: cardTitle }))
-    const enabled = screen.getByRole('checkbox', { name: new RegExp(`^${en.enabled}`) })
-    const thinkAutoExpand = screen.getByRole('checkbox', { name: new RegExp(`^${en.thinkAutoExpand}`) })
-    expect((enabled as HTMLInputElement).checked).toBe(false)
-    expect(thinkAutoExpand.getAttribute('disabled')).not.toBeNull()
-
-    fireEvent.click(enabled)
-    card.rerender(<SmoothStreamCard {...cardProps(face)} />)
-    expect((screen.getByRole('checkbox', { name: new RegExp(`^${en.enabled}`) }) as HTMLInputElement).checked)
-      .toBe(true)
-    expect(screen.getByRole('checkbox', { name: new RegExp(`^${en.thinkAutoExpand}`) }).getAttribute('disabled'))
-      .toBeNull()
-  })
-
-  it('returns conversation rendering to Harness while the master toggle is off', async () => {
-    function BuiltInAssistant() { return null }
-    function BuiltInTool() { return null }
-    const { ctx, slots } = await bench({ view: { ...developmentView, enabled: false } })
-    slots.register({
-      name: 'root',
-      children: {
-        'settings.plugin.item': { kind: 'list', scope: 'root' },
-        'conversation.chat.node': { kind: 'keyed', scope: 'session' },
-      },
-    } as never, () => null)
-    slots.register({ name: 'conversation.chat.node', key: 'assistant-step' } as never, BuiltInAssistant as never)
-    slots.register({ name: 'conversation.chat.node', key: 'context' } as never, BuiltInTool as never)
-    await ctx.plugin({ inject: [...inject], apply }).await()
-    const face = cardFace(slots)
-    await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({
-      status: 'ready',
-      enabled: false,
-    }))
-
-    // 0.2.x renders every keyed entry as its own seat, so the takeover swaps the
-    // built-in assistant row's component IN PLACE (index.ts syncTakeover) and
-    // never registers a priority:-100 shadow; the shadow path only survives for
-    // compositions that declare no built-in assistant row. Assert the swap, the
-    // untouched rows while disabled, and the restore on discard/discard.
-    const entryOf = (key: string) => slots.entries('conversation.chat.node')
-      .find(entry => entry.options.key === key)
-    expect(entryOf('assistant-step')?.component).toBe(BuiltInAssistant)
-    expect(entryOf('context')?.component).toBe(BuiltInTool)
-    expect(slots.entries('conversation.chat.node').some(entry => entry.options.priority === -100))
-      .toBe(false)
-
-    face.edit({ enabled: true })
-    expect(entryOf('assistant-step')?.component).not.toBe(BuiltInAssistant)
-    expect(entryOf('context')?.component).not.toBe(BuiltInTool)
-    expect(slots.entries('conversation.chat.node').some(entry => entry.options.priority === -100))
-      .toBe(false)
-
-    face.discard()
-    expect(entryOf('assistant-step')?.component).toBe(BuiltInAssistant)
-    expect(entryOf('context')?.component).toBe(BuiltInTool)
-  })
-
-  it('does not take over before a saved disabled setting resolves or after its service unloads', async () => {
-    function BuiltInAssistant() { return null }
-    function BuiltInTool() { return null }
-    const read = deferred()
-    const { ctx, slots, removeConnection } = await bench({
-      view: { ...developmentView, enabled: false },
-      readGate: read.promise,
-    })
-    slots.register({
-      name: 'root',
-      children: {
-        'settings.plugin.item': { kind: 'list', scope: 'root' },
-        'conversation.chat.node': { kind: 'keyed', scope: 'session' },
-      },
-    } as never, () => null)
-    slots.register({ name: 'conversation.chat.node', key: 'assistant-step' } as never, BuiltInAssistant as never)
-    slots.register({ name: 'conversation.chat.node', key: 'tool-call' } as never, BuiltInTool as never)
-    await ctx.plugin({ inject: [...inject], apply }).await()
-
-    expect(slots.entries('conversation.chat.node').filter(entry => entry.options.priority === -100))
-      .toHaveLength(0)
-    expect(slots.entries('conversation.chat.node').find(entry => entry.options.key === 'tool-call')?.component)
-      .toBe(BuiltInTool)
-
-    read.resolve()
-    await vi.waitFor(() => expect(cardFace(slots).hooks.smoothStreamCard.getSnapshot()).toMatchObject({
-      status: 'ready',
-      enabled: false,
-    }))
-    await removeConnection()
-
-    expect(slots.entries('conversation.chat.node').filter(entry => entry.options.priority === -100))
-      .toHaveLength(0)
-    expect(slots.entries('conversation.chat.node').find(entry => entry.options.key === 'tool-call')?.component)
-      .toBe(BuiltInTool)
-  })
-
-  it('blocks preference edits while a save is in flight', async () => {
-    const write = deferred()
-    const { ctx, slots } = await bench({ writeGate: write.promise })
-    declareCardSlot(slots)
-    await ctx.plugin({ inject: [...inject], apply }).await()
-    const face = cardFace(slots)
-    await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot().status).toBe('ready'))
-    face.edit({ enabled: false })
-    face.save()
-    await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot().saving).toBe(true))
-    face.edit({ enabled: true })
+  it('stages the enable switch and writes both preferences', async () => {
+    const { face, screen, bench } = await renderCard()
+    const enable = screen.getByRole('checkbox', { name: new RegExp(en.enabled) }) as HTMLInputElement
+    fireEvent.click(enable)
     expect(face.hooks.smoothStreamCard.getSnapshot().enabled).toBe(false)
-    render(<SmoothStreamCard {...cardProps(face)} />)
-    fireEvent.click(screen.getByRole('button', { name: cardTitle }))
-
-    expect(screen.getByRole('checkbox', { name: new RegExp(`^${en.enabled}`) }).getAttribute('disabled'))
-      .not.toBeNull()
-    expect(screen.getByRole('checkbox', { name: new RegExp(`^${en.thinkAutoExpand}`) }).getAttribute('disabled'))
-      .not.toBeNull()
-
-    write.resolve()
-    await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({ saving: false }))
+    // The first Save belongs to the base preferences; the translation channel
+    // renders its own Save after it.
+    fireEvent.click(screen.getAllByRole('button', { name: en.save })[0] as HTMLElement)
+    await waitFor(() => expect(bench.call).toHaveBeenCalledWith(
+      STREAM_SETTINGS_RPC_CHANNEL,
+      STREAM_SETTINGS_RPC.write,
+      { enabled: false, thinkAutoExpand: true },
+    ))
+    await waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot().dirty).toBe(false))
   })
 
-  it('shows an unavailable card instead of removing it when its RPC cannot be reached', async () => {
-    const { ctx, slots } = await bench({ failRead: true })
-    declareCardSlot(slots)
-    await ctx.plugin({ inject: [...inject], apply }).await()
-    const face = cardFace(slots)
-    await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot().status).toBe('unavailable'))
-    render(<SmoothStreamCard {...cardProps(face)} />)
-
-    expect(screen.getByText(en.title)).toBeTruthy()
+  it('disables auto-follow while the master switch is off', async () => {
+    const { face, screen } = await renderCard({ view: { ...readyView, enabled: false } })
+    const follow = screen.getByRole('checkbox', { name: new RegExp(en.thinkAutoExpand) }) as HTMLInputElement
+    expect(follow.disabled).toBe(true)
+    expect(face.hooks.smoothStreamCard.getSnapshot().thinkAutoExpand).toBe(true)
   })
 
-  it('streams without the settings surface (no card slot declared)', async () => {
-    const { ctx, slots } = await bench()
-    slots.register({
-      name: 'root',
-      children: { 'conversation.chat.node': { kind: 'keyed', scope: 'session' } },
-    } as never, () => null)
-    await ctx.plugin({ inject: [...inject], apply }).await()
-
-    expect(slots.entries('conversation.chat.node').some(entry => entry.options.key === 'assistant-step'))
-      .toBe(true)
+  it('reports a read-only deployment and blocks edits', async () => {
+    const { screen } = await renderCard({ view: { ...readyView, writable: false } })
+    expect(screen.getByText(en.readOnly)).toBeTruthy()
+    expect((screen.getByRole('checkbox', { name: new RegExp(en.enabled) }) as HTMLInputElement).disabled).toBe(true)
   })
 
-  it('registers the card when the optional settings services arrive after activation', async () => {
-    const ctx = new Context()
-    await ctx.plugin(SlotRegistry).await()
-    const slots = ctx.get('slots') as SlotRegistry
-    await ctx.plugin({ inject: [...inject], apply }).await()
+  it('shows an unavailable card and retries the read', async () => {
+    const { face, screen, bench } = await renderCard({ failRead: true })
+    expect(face.hooks.smoothStreamCard.getSnapshot().status).toBe('unavailable')
+    expect(screen.getByText(en.unavailable)).toBeTruthy()
+    bench.call.mockClear()
+    fireEvent.click(screen.getByRole('button', { name: en.retry }))
+    // The read is retried; this fake still fails it, so the card stays in its
+    // unavailable state rather than pretending the deployment recovered.
+    await waitFor(() => expect(bench.call).toHaveBeenCalledWith(STREAM_SETTINGS_RPC_CHANNEL, STREAM_SETTINGS_RPC.read, {}))
+  })
 
-    const locale = new LocaleRuntime(ctx)
-    ctx.provide('locale', locale)
-    ctx.provide('connection', {
-      rpc: { call: vi.fn(() => Promise.resolve({ ok: true, value: developmentView })) },
-    } as never)
-    declareCardSlot(slots)
+  it('keeps the staged value and reports a failed save', async () => {
+    const { face, screen } = await renderCard({ failWrite: true })
+    fireEvent.click(screen.getByRole('checkbox', { name: new RegExp(en.enabled) }))
+    fireEvent.click(screen.getAllByRole('button', { name: en.save })[0] as HTMLElement)
+    await waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot().failed).toBe(true))
+    expect(face.hooks.smoothStreamCard.getSnapshot().enabled).toBe(false)
+    expect(screen.getByText(en.saveFailed)).toBeTruthy()
+  })
 
-    await vi.waitFor(() => {
-      expect(slots.entries('settings.plugin.item').map(entry => entry.options.id))
-        .toEqual(['smooth-stream'])
+  it('edits and saves the translation channel', async () => {
+    const { face, screen, bench } = await renderCard()
+    await waitFor(() => expect(face.hooks.translationCard.getSnapshot().status).toBe('ready'))
+    const auto = screen.getByRole('checkbox', { name: new RegExp(en.translationAutoTranslate) }) as HTMLInputElement
+    expect(auto.checked).toBe(false)
+    fireEvent.click(auto)
+    const saves = screen.getAllByRole('button', { name: en.save })
+    fireEvent.click(saves[saves.length - 1] as HTMLElement)
+    // The translation bridge forwards its AbortSignal as the fourth argument.
+    await waitFor(() => expect(bench.call).toHaveBeenCalledWith(
+      TRANSLATION_RPC_CHANNEL,
+      TRANSLATION_RPC.settingsWrite,
+      expect.objectContaining({ autoTranslate: true }),
+      undefined,
+    ))
+  })
+
+  it('returns the assistant row to Harness once the saved switch is off', async () => {
+    function BuiltIn(): null { return null }
+    const harness = await bench({ view: { ...readyView, enabled: false } })
+    declareCardSlot(harness.slots)
+    const builtin = harness.slots.register({
+      name: 'conversation.chat.node',
+      key: 'assistant-step',
+    } as never, BuiltIn as never)
+    const fiber = harness.ctx.plugin({ inject: [...inject], apply })
+    await fiber.await()
+    await waitFor(() => {
+      const entry = harness.slots.entries('conversation.chat.node')
+        .find(item => item.options.key === 'assistant-step')
+      expect(entry?.component).toBe(BuiltIn)
     })
+    builtin()
+  })
+
+  it('does not take the row over before the saved setting resolves', async () => {
+    function BuiltIn(): null { return null }
+    const gate = deferred()
+    const harness = await bench({ readGate: gate.promise })
+    declareCardSlot(harness.slots)
+    harness.slots.register({
+      name: 'conversation.chat.node',
+      key: 'assistant-step',
+    } as never, BuiltIn as never)
+    const fiber = harness.ctx.plugin({ inject: [...inject], apply })
+    await fiber.await()
+    const entry = harness.slots.entries('conversation.chat.node')
+      .find(item => item.options.key === 'assistant-step')
+    expect(entry?.component).toBe(BuiltIn)
+    gate.resolve()
+    await waitFor(() => {
+      const current = harness.slots.entries('conversation.chat.node')
+        .find(item => item.options.key === 'assistant-step')
+      expect(current?.component).not.toBe(BuiltIn)
+    })
+  })
+
+  it('ignores core settings describe and stays on the plugin RPC', async () => {
+    const { screen } = await renderCard()
+    expect(screen.getByText(en.enabledHint)).toBeTruthy()
+    // No version/installation copy can appear without the removed view fields.
+    expect(screen.container.textContent).not.toContain('0.1.0')
   })
 })

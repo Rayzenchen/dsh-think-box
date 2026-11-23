@@ -15,11 +15,11 @@ import * as DshSettings from '@deepseek-ai/dsh-settings'
 const { SettingsProvider } = DshSettings
 type SettingsNamespace = DshSettings.SettingsNamespace
 import { afterEach, describe, expect, it } from 'vitest'
-const STREAM_PACKAGE_VERSION = '1.1.0'
 import type { StreamConfig, Volatile } from '../src/config.ts'
 import { apply, Config } from '../src/plugin.ts'
 import { STREAM_SETTINGS_RPC, STREAM_SETTINGS_RPC_CHANNEL } from '../src/settings-api.ts'
 import { DEFAULT_STREAM_SETTINGS } from '../src/settings.ts'
+import { TRANSLATION_RPC, TRANSLATION_RPC_CHANNEL } from '../src/translation-protocol.ts'
 
 /** Symbol the host Loader uses to commit a new volatile snapshot. */
 const VOLATILE_WRITE = Symbol.for('cosmokit.volatile.write')
@@ -44,13 +44,7 @@ function resolveConfig(): Config {
   return {
     ...withDefaults,
     enabled: ref(withDefaults.enabled),
-    controlScroll: ref(withDefaults.controlScroll),
-    preset: ref(withDefaults.preset),
-    motionPreference: ref(withDefaults.motionPreference),
     thinkAutoExpand: ref(withDefaults.thinkAutoExpand),
-    logarithmicFade: ref(withDefaults.logarithmicFade),
-    debugEnabled: ref(withDefaults.debugEnabled),
-    debugTuning: ref({ ...withDefaults.debugTuning }),
   } as unknown as Config
 }
 
@@ -152,7 +146,7 @@ async function call(
     ?? JSON.stringify({ type: 'client-request', rpcId: 'probe-1', method: endpoint, payload })
   const req = Readable.from([Buffer.from(body)]) as unknown as IncomingMessage
   req.method = method
-  req.url = `${STREAM_SETTINGS_RPC_CHANNEL}/${endpoint}`
+  req.url = `${route.path}/${endpoint}`
   req.headers = headers
   const state: Exchange = { status: 0, body: '' }
   const res = {
@@ -180,29 +174,21 @@ describe('smooth-stream settings channel fallback', () => {
       result: {
         ok: true,
         value: {
-          version: STREAM_PACKAGE_VERSION,
-          installation: 'unmanaged',
           writable: true,
           enabled: DEFAULT_STREAM_SETTINGS.enabled,
-          controlScroll: DEFAULT_STREAM_SETTINGS.controlScroll,
-          preset: DEFAULT_STREAM_SETTINGS.preset,
-          motionPreference: DEFAULT_STREAM_SETTINGS.motionPreference,
           thinkAutoExpand: DEFAULT_STREAM_SETTINGS.thinkAutoExpand,
-          logarithmicFade: DEFAULT_STREAM_SETTINGS.logarithmicFade,
-          canUpgrade: false,
         },
       },
     })
 
     const write = await call(route as WebRoute, STREAM_SETTINGS_RPC.write, {
       enabled: false,
-      controlScroll: true,
       thinkAutoExpand: true,
     })
     expect(JSON.parse(write.body)).toMatchObject({
-      result: { ok: true, value: { enabled: false, controlScroll: true } },
+      result: { ok: true, value: { enabled: false, thinkAutoExpand: true } },
     })
-    expect(host.persisted()).toMatchObject({ enabled: false, controlScroll: true })
+    expect(host.persisted()).toMatchObject({ enabled: false, thinkAutoExpand: true })
 
     await host.dispose()
     mounted.pop()
@@ -239,6 +225,30 @@ describe('smooth-stream settings channel fallback', () => {
       rpcId: 'invalid-request',
       result: { ok: false, error: { code: 'gateway/bad-request' } },
     })
+  })
+
+  it('rejects the removed debug and upgrade endpoints as unknown', async () => {
+    const host = await mountHost(true)
+    mounted.push(host.dispose)
+    const route = host.routes.find(candidate => candidate.path === STREAM_SETTINGS_RPC_CHANNEL) as WebRoute
+    for (const endpoint of ['debug.read', 'debug.write', 'plugin.upgrade']) {
+      const reply = await call(route, endpoint, {})
+      expect(JSON.parse(reply.body)).toMatchObject({
+        result: { ok: false, error: { code: 'internal' } },
+      })
+    }
+  })
+
+  it('keeps the translation channel and its four endpoints', async () => {
+    const host = await mountHost(true)
+    mounted.push(host.dispose)
+    const route = host.routes.find(candidate => candidate.path === TRANSLATION_RPC_CHANNEL)
+    expect(route).toMatchObject({ kind: 'prefix', path: TRANSLATION_RPC_CHANNEL })
+    const read = await call(route as WebRoute, TRANSLATION_RPC.settingsRead, {})
+    const reply = JSON.parse(read.body) as { result?: { ok?: boolean; value?: Record<string, unknown> } }
+    expect(reply.result?.ok).toBe(true)
+    expect(typeof reply.result?.value?.backend).toBe('string')
+    expect(typeof reply.result?.value?.autoTranslate).toBe('boolean')
   })
 
   it('fails closed instead of exposing the channel without the connection fence', async () => {

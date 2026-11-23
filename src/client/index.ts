@@ -28,7 +28,7 @@ import {
   type StreamConfig,
   type TranslationConfig,
 } from '../config.ts'
-import { DEFAULT_STREAM_SETTINGS, type StreamDebugTuning, type StreamSettings } from '../settings.ts'
+import { DEFAULT_STREAM_SETTINGS, type StreamSettings } from '../settings.ts'
 
 /**
  * Cordis services required by the browser half. Only `slots` is load-bearing
@@ -40,42 +40,18 @@ export const inject = ['slots']
 
 type AssistantProps = ChatNodeViewProps<'assistant-step'>
 
-const STREAM_MODES: readonly string[] = ['typewriter', 'teleprompter']
-const STREAM_PRESETS: readonly string[] = ['realtime', 'balanced', 'silky']
-
 /**
- * Preference keys the pre-0.2.2-independent Host build did not put in the boot
- * global. `preset` is excluded on purpose: it existed as a core engine field
- * before it became a preference, so its presence cannot distinguish the builds.
+ * Preference keys the older Host build may have carried instead of the current
+ * snapshot. Their presence alone is a real disagreement only when the two
+ * remaining booleans are malformed; extra legacy fields are ignored.
  */
-const BOOT_PREFERENCE_KEYS = [
-  'enabled',
-  'controlScroll',
-  'motionPreference',
-  'thinkAutoExpand',
-  'logarithmicFade',
-  'debugEnabled',
-  'debugTuning',
-] as const
+const BOOT_SETTING_KEYS = ['enabled', 'thinkAutoExpand'] as const
 
-/** Whether any preference-snapshot field is present in a boot global value. */
-function hasPreferenceSnapshotFields(raw: unknown): boolean {
+/** Whether any preference field is present in a boot global value. */
+function hasPreferenceFields(raw: unknown): boolean {
   if (typeof raw !== 'object' || raw === null) return false
-  return BOOT_PREFERENCE_KEYS.some(key => key in (raw as Record<string, unknown>))
+  return BOOT_SETTING_KEYS.some(key => key in raw)
 }
-
-/** Numeric fields the boot snapshot must carry for the diagnostics panel. */
-const BOOT_DEBUG_TUNING_KEYS = [
-  'revealScale',
-  'queuePressure',
-  'maxRevealCps',
-  'springStiffness',
-  'springDamping',
-  'springMass',
-  'runwayPx',
-  'reserveResponseMs',
-  'backpressureMinScale',
-] as const
 
 /** React function/class or an exotic component such as memo/forwardRef/lazy. */
 function isWrappableComponent(value: unknown): value is ComponentType<AssistantProps> {
@@ -88,8 +64,13 @@ function isWrappableComponent(value: unknown): value is ComponentType<AssistantP
  * plugin's Host half from a schema-validated value, so only the structural
  * guarantees that could break between the two halves are re-checked: the
  * global is absent when the client runs without its Host entry (defaults
- * apply), and any present-but-malformed value fails loudly instead of
- * rendering a half-configured view.
+ * apply), and a malformed preference fails loudly instead of rendering a
+ * half-configured view.
+ *
+ * Extra keys are ignored: during the build window the running Host can still
+ * serve its previous boot HTML (old engine fields) while the new client bundle
+ * is already on disk. Missing preferences fall back to defaults with an info
+ * line; a present-but-broken preference is a hard error.
  * @returns The resolved configuration for the assistant node view.
  */
 function readBootConfig(): StreamConfig {
@@ -100,76 +81,34 @@ function readBootConfig(): StreamConfig {
   }
   const malformed = (): Error =>
     new Error(`[dsh-smooth-stream] malformed ${STREAM_BOOT_GLOBAL} boot global: ${JSON.stringify(raw)}`)
-  // Core engine fields are load-bearing: a bad one means the two halves really
-  // disagree, and rendering from it would be worse than failing loudly.
-  if (
-    typeof raw !== 'object' || raw === null
-    || !STREAM_MODES.includes((raw as StreamConfig).mode)
-    || !STREAM_PRESETS.includes((raw as StreamConfig).preset)
-    || typeof (raw as StreamConfig).revealCharsPerSec !== 'number'
-    || typeof (raw as StreamConfig).scrollSpeedPxPerSec !== 'number'
-    || typeof (raw as StreamConfig).maxScrollSpeedPxPerSec !== 'number'
-  ) {
-    throw malformed()
-  }
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) throw malformed()
   const snapshot = readSettingsSnapshot(raw)
-  if (snapshot === undefined && hasPreferenceSnapshotFields(raw)) {
-    // The preferences are present but malformed: this is a real disagreement.
-    throw malformed()
-  }
+  if (snapshot === undefined && hasPreferenceFields(raw)) throw malformed()
   if (snapshot === undefined) {
-    // Build window: this client bundle can be served by the Host build that
-    // loaded before the preference snapshot was added (new lib on disk, old
-    // process still serving its boot HTML). Fall back to the shared defaults
-    // instead of breaking a page refresh; the card RPC then loads live values.
-    console.warn(
-      `[dsh-smooth-stream] ${STREAM_BOOT_GLOBAL} predates the preference snapshot `
-      + '(Host process not restarted yet?); using default preferences until it is',
+    console.info(
+      `[dsh-smooth-stream] ${STREAM_BOOT_GLOBAL} predates the preference snapshot; using defaults`,
     )
+    return DEFAULT_STREAM_CONFIG
   }
   return {
-    ...DEFAULT_STREAM_CONFIG,
-    ...raw as StreamConfig,
+    enabled: snapshot.enabled,
+    thinkAutoExpand: snapshot.thinkAutoExpand,
     translation: readTranslationConfig((raw as { translation?: unknown }).translation),
-  } as StreamConfig
+  }
 }
 
 /**
- * Validate the preference snapshot the Host folds into the boot global. The
- * Host reads every volatile config reference before injecting the script, so
- * these are plain values here; a missing or malformed field means the two
- * halves disagree and must fail loudly instead of rendering defaults.
+ * Validate the two preference fields the Host folds into the boot global. The
+ * Host reads both volatile references before injecting the script, so these are
+ * plain values here; malformed values mean the two halves disagree.
  * @param raw - boot global value.
  * @returns the validated preferences, or `undefined` when malformed.
  */
 function readSettingsSnapshot(raw: unknown): StreamSettings | undefined {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return undefined
   const value = raw as Record<string, unknown>
-  const tuning = value.debugTuning
-  if (
-    typeof value.enabled !== 'boolean'
-    || typeof value.controlScroll !== 'boolean'
-    || typeof value.preset !== 'string' || !STREAM_PRESETS.includes(value.preset as StreamSettings['preset'])
-    || value.motionPreference !== 'auto' && value.motionPreference !== 'force-smooth' && value.motionPreference !== 'force-reduced'
-    || typeof value.thinkAutoExpand !== 'boolean'
-    || typeof value.logarithmicFade !== 'boolean'
-    || typeof value.debugEnabled !== 'boolean'
-    || typeof tuning !== 'object' || tuning === null || Array.isArray(tuning)
-  ) return undefined
-  const tuningValue = tuning as Record<string, unknown>
-  for (const key of BOOT_DEBUG_TUNING_KEYS) {
-    if (typeof tuningValue[key] !== 'number') return undefined
-  }
-  return {
-    enabled: value.enabled,
-    controlScroll: value.controlScroll,
-    preset: value.preset as StreamSettings['preset'],
-    motionPreference: value.motionPreference,
-    thinkAutoExpand: value.thinkAutoExpand,
-    logarithmicFade: value.logarithmicFade,
-    debugEnabled: value.debugEnabled,
-    debugTuning: tuning as unknown as StreamDebugTuning,
-  }
+  if (typeof value.enabled !== 'boolean' || typeof value.thinkAutoExpand !== 'boolean') return undefined
+  return { enabled: value.enabled, thinkAutoExpand: value.thinkAutoExpand }
 }
 
 /**
@@ -257,13 +196,7 @@ class SettingsCell {
     if (
       pending === this.pending
       && next.enabled === this.value.enabled
-      && next.controlScroll === this.value.controlScroll
-      && next.preset === this.value.preset
-      && next.motionPreference === this.value.motionPreference
       && next.thinkAutoExpand === this.value.thinkAutoExpand
-      && next.logarithmicFade === this.value.logarithmicFade
-      && next.debugEnabled === this.value.debugEnabled
-      && next.debugTuning === this.value.debugTuning
     ) return
     this.pending = pending
     this.value = next
@@ -300,9 +233,9 @@ class SettingsCell {
  * every other keyed renderer is wrapped in place so Context, commands, Tool
  * cards, retries, and workflow runs share one extensible follow boundary. The
  * Host-bridged configuration
- * selects the render direction, smoothing preset, and glide speed; the
- * plugin-owned settings RPC supplies the live auto-expand preference when the
- * settings surface is composed.
+ * no longer selects engine knobs: the reasoning box ships one cadence. The
+ * plugin-owned settings RPC supplies the live enable/auto-follow preferences
+ * when the settings surface is composed.
  * @param ctx - Browser context carrying the shared slot registry.
  */
 export function apply(ctx: ClientContext): void {

@@ -3,19 +3,10 @@
     - id: think-box
       name: '@local/dsh-think-box'
       config:
-        mode: typewriter
-        preset: balanced
-        revealCharsPerSec: 80
-        scrollSpeedPxPerSec: 48
-        maxScrollSpeedPxPerSec: 1000
         # User-editable preferences (0.2.x: volatile config fields persisted in
         # this same profile entry; the Plugins-page card edits them live).
         enabled: true
-        controlScroll: true
-        motionPreference: auto
         thinkAutoExpand: true
-        logarithmicFade: true
-        debugEnabled: false
         # Reasoning translation backend.
         #   bundle = official "思考过程翻译" bundle (Google / Bing / native
         #            DeepSeek routes only)

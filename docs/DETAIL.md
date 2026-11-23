@@ -17,7 +17,7 @@
 
 ## 隐私
 
-启用翻译后，思考文本会发送到你选择的翻译服务或模型路由。是否自动发送由 `autoTranslate` 决定（本机随仓库的默认值为开启，流式已完成片段会自动发送；关闭后仅点击时发送）；历史思考块始终手动。
+启用翻译后，思考文本会发送到你选择的翻译服务或模型路由。是否自动发送由 `autoTranslate` 决定：仓库默认种子是开启，实际以本机 `~/.dsh/think-box/translation.json` 的当前值为准（本机当前是关闭，只有手动点击才发送）；历史思考块始终手动。
 
 ## 已知限制
 
@@ -32,6 +32,6 @@
 
 A local fork of Laplace-bit/dsh-smooth-stream v0.7.0. It adds an inline reasoning box (three-line preview, click to open up to 18 lines, one settle flourish), smooth per-character reveal with damped viewport follow (`realtime` / `balanced` / `silky`), and optional reasoning translation via the official bundle or any registered DSH model route.
 
-Settings live in two places: the Plugins-page card persists its switches to the profile entry config (`~/.dsh/profiles/<profile>/cordis.patch.yml`, `id: think-box`, volatile — applied live) and the translation channel persists to `~/.dsh/think-box/translation.json`. Enabling translation sends reasoning text to the selected service/route; `autoTranslate` controls whether finished streaming fragments are sent automatically (default on in this checkout; historical blocks are always manual).
+Settings live in two places: the Plugins-page card persists its switches to the profile entry config (`~/.dsh/profiles/<profile>/cordis.patch.yml`, `id: think-box`, volatile — applied live) and the translation channel persists to `~/.dsh/think-box/translation.json`. Enabling translation sends reasoning text to the selected service/route; `autoTranslate` controls whether finished streaming fragments are sent automatically (the repository seed defaults it on, but the effective value is whatever `~/.dsh/think-box/translation.json` currently holds — off on this machine today; historical blocks are always manual).
 
 Tested on DSH 0.2.2-rc.5. The plugin depends on non-public seams (`assistant-step` in-place swap, 0.2.x `groupPart` mounts, `data-conversation-scroll`, connection-RPC fallback, volatile config + `configEditor`) — regress after every DSH upgrade. Upstream is at 0.8.0 and unmerged. The old post-turn scroll/composer bug is unresolved (see `FIX-REPORT-2026-10-11.md`), and the suite is at 269/297 with tracked geometry/timing failures.

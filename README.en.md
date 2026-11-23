@@ -81,7 +81,7 @@ The `translation:` block in `cordis.patch.yml` only seeds the first launch; afte
 ## Translation privacy
 
 - Enabling translation and sending reasoning text means **that text is sent to the translation service or model route you selected**: `bundle` sends it to the selected official service (Google / Bing / native DeepSeek APIs), `llm` sends it to the configured `provider`/`model`.
-- Automatic sending is governed by the **`autoTranslate`** setting. The default shipped in this repository's `cordis.patch.yml` is **on**: while reasoning streams, finished fragments are sent automatically. Turn it off on the Plugins page and translation is sent only when you click "Show translation".
+- Automatic sending is governed by the **`autoTranslate`** setting. The repository seed in `cordis.patch.yml` defaults it to **on**, but the effective value is whatever `~/.dsh/think-box/translation.json` currently holds (**off on this machine today**: translation is sent only when you click "Show translation").
 - **Historical reasoning blocks are always manual**, even with `autoTranslate` on.
 - If you do not want translation, leave the translation channel off or simply do not click the toggle. The plugin sends conversation content nowhere else.
 
@@ -102,7 +102,7 @@ The `translation:` block in `cordis.patch.yml` only seeds the first launch; afte
 
 ## Known issues
 
-- **The old post-turn scrolling / composer-position bug is still unresolved**: the root cause is unconfirmed; investigation notes and hand-off suggestions are in [`FIX-REPORT-2026-10-11.md`](FIX-REPORT-2026-10-11.md). It is also unfixed upstream; follow that document's "unresolved" section first when it reproduces.
+- **The old post-turn scrolling / composer-position bug is still unresolved**: the root cause is unconfirmed; investigation notes and hand-off suggestions are in [`FIX-REPORT-2026-10-11.md`](FIX-REPORT-2026-10-11.md). Whether a later upstream release covers it is unconfirmed; follow that document's "unresolved" section first when it reproduces.
 - **The test suite is only partially restored**: the current full run is `269/297`; the remaining 28 are pre-existing streaming geometry/timing and logarithmic-fade failures (`stream` 18, `logarithmic-fade` 10). They are tracked, not green.
 - Relative links inside the Plugins-page detail document are rendered as plain text, so the docs do not rely on link navigation.
 
@@ -137,7 +137,7 @@ tests/shims/         Host-package doubles for Vitest
 locale/              Plugin metadata and Plugins-page copy (meta.detail -> docs/DETAIL.md)
 docs/DETAIL.md       Plugins-page "detail" document
 cordis.patch.yml     Default config layer injected when loaded as a bundle
-scripts/             Benchmarks, diagnostics and dev probes
+scripts/             Benchmarks and dev diagnostic probes
 benchmarks/          Streaming-engine benchmark harness
 lib/                 Build output (generated, do not edit)
 ```

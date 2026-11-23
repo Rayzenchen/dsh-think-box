@@ -1,186 +1,151 @@
-# dsh-smooth-stream
+# 思维链显示增强（@local/dsh-think-box）
 
-> **让 AI 的长篇生成如提词器般温润流淌。**  
-> 为 DeepSeek Harness（`dsh`）打造的二阶弹簧物理流式渲染与零重排跟随引擎。
+本地分叉的 DeepSeek Harness（`dsh`）浏览器插件。上游是 [Laplace-bit/dsh-smooth-stream](https://github.com/Laplace-bit/dsh-smooth-stream)，分叉基线为上游 **v0.7.0**；本仓库不再跟随上游发布（上游已到 0.8.0，未合并）。
 
-[English](README.en.md) · [项目主页](https://laplace-bit.github.io/dsh-smooth-stream/) · [工作原理与基准](https://laplace-bit.github.io/dsh-smooth-stream/how-it-works.html) · [npm](https://www.npmjs.com/package/dsh-smooth-stream)
+它围绕三件事叠在一起：
 
----
+1. **思考框**：模型的推理不再是一个需要点开的折叠块，而是「思考」行右侧一块常驻的多行展示窗；
+2. **丝滑流式**：正文逐字揭示 + 视口平滑跟随，消掉大段文本突然出现和滚动抖动；
+3. **思考翻译**：可选把推理内容翻成界面语言，走官方「思考过程翻译」组合包或任意已注册的模型路由。
 
-## 极致丝滑的阅读手感
-
-无论是阅读数百行的长篇推演，还是紧盯高速吐字的代码生成，`dsh-smooth-stream` 带来的是一种**沉浸、连贯且零视觉负担**的阅读质感：
-
-- **如水流般自然铺展**：告别大段文本突然“砸”在屏幕上的视觉压迫，字句如打字机般富有呼吸感地逐字涌现；
-- **视线无需追赶跳动**：视口如同搭载了高精度阻尼滑轨，随文字增长平稳匀速推移，彻底终结换行时的突发踢移；
-- **呼吸感与实时性的平衡**：慢速输出时从容优雅，高并发爆发时平稳追赶，无论模型吐字多快，画面始终从容自若。
+[English](README.en.md) · [插件页详情](docs/DETAIL.md)
 
 ---
 
-## 为什么需要它？
+## 功能
 
-大模型输出是通过网络分块到达的。一个数据包可能在几毫秒内送达数百字符，下一个分块却需要数十毫秒。
+### 1. 行内思考窗
 
-如果直接将 DOM 渲染和视口滚动绑定在离散的到达事件上，通常会引发两个阅读体验问题：
-1. **视觉跳跃与撕裂**：段落、代码块和表格整段突发呈现，视线被迫频繁重新寻焦；
-2. **滚动抖动与重排风暴**：依靠 `scrollTop = scrollHeight` 进行瞬时硬跳；即使用 CSS `scroll-behavior: smooth`，高频写入也会不断重置缓动曲线，导致动画永远无法收敛，高速流下伴随剧烈的主线程重排。
+- 流式期间，推理文本显示在「思考」行右侧的**行内多行框**里；默认只占三行，不会把对话撑高。
+- 点击「思考」行，下方展开完整推理 body（最多 18 行，内容更少时按内容收缩）；再点一次收起。
+- 思考结束时做一次「回卷」：先跟到最新一行、停一拍，再匀速回卷到开头，最后收成一行；整段过程只播放一次。
+- 已结束的历史推理不再播放回卷，直接以一行摘要态呈现。
 
-`dsh-smooth-stream` 将**内容呈现**与**视口运动**拆分为两个独立的物理状态机，在每一帧动画回调（rAF）中连续积分，彻底消除跳跃感。
+### 2. 正文丝滑流式
+
+- 模型的分块到达是突发的，插件把「内容呈现」和「视口运动」拆成两个状态机：正文按到达速率做逐字揭示，视口用阻尼跟随，不再 `scrollTop = scrollHeight` 硬跳。
+- 揭示速度带背压：视口快追不上时自动降速，避免文本冲出可视区。
+- 手感由 `preset` 控制：`realtime` 更贴近实时、`balanced` 默认、`silky` 更平缓。
+- **对数淡入**：新出现的尾部文字由通透渐变到实色，代码、公式、思考摘要等区域会跳过；浏览器不支持文字范围着色时自动退回普通渲染。
+- **渲染调试面板**：默认关闭；打开后可在界面右侧看到 FPS、字符积压、跟随滞后等实时指标。
+
+### 3. 思考翻译（可选）
+
+- 思考行右侧提供「查看译文 / 查看原文」切换；翻译只替换思考框显示的文字，不改变揭示与跟随。
+- 两种后端：
+  - `bundle`：官方「思考过程翻译」组合包（Google / Bing / DeepSeek 官方 API），需在插件页启用该组合包；
+  - `llm`：由本插件 Host 侧直接转发给任意已注册的 DSH 模型路由（例如免费的 OpenCode Go DeepSeek 4.1 Flash），按约 4000 字分片。
+- 流式过程中会把已完成的片段增量翻译，未完成的末尾保持原文；历史会话里的旧推理块需要手动点击。
 
 ---
 
-## 核心机理与架构
+## 安装与启用（本机）
+
+本机不使用 npm 安装，而是把仓库 link 进 `desktop` profile：
+
+1. profile 的 `package.json` 依赖指向本仓库：
+   ```json
+   { "@local/dsh-think-box": "link:/Users/wench/Documents/DS Harness/dsh-think-box-plugin" }
+   ```
+2. 该包出现在 profile 的 `dsh.profile.bundles` 列表里（随仓库内 `cordis.patch.yml` 提供默认配置）。
+3. 启动/刷新 DSH Web 后，在**侧栏「插件」页**找到「思维链显示增强（@local/dsh-think-box）」并启用；关闭插件页里的总开关即可把渲染权还给 Harness 内置 UI。
+
+Host 日志出现 `[dsh-think-box] plugin loaded!` 表示宿主半边已加载。
+
+---
+
+## 设置与存储（两处，别混淆）
+
+### 插件页卡片的开关 → profile 条目配置
+
+「思维链显示增强」卡片上的开关（启用丝滑流式、接管滚动、手感 preset、动效偏好、自动展开思考、对数淡入、渲染调试面板及调试参数）**可编辑并持久化在 profile 的条目配置里**：
 
 ```
-[ 模型 SSE 分块流 ]
-         │
-         ▼
- ┌─────────────────┐       背压阻尼 (0.55x ~ 1.0x)       ┌─────────────────┐
- │   揭示节奏引擎   │ ◄──────────────────────────────── │   弹簧跟随引擎   │
- │ (Reveal Engine) │                                   │ (Follow Engine) │
- └────────┬────────┘                                   └────────┬────────┘
-          │ 字符积压与分数积分                                      │ 二阶阻尼弹簧积分 (k=130, c=24)
-          ▼                                                     ▼
- [ 逐帧平滑展开 DOM ] ───────────────────────────────► [ 合成层 Transform 补偿 ]
-  (单帧视觉位移 ≤ 8px)                                   (0 Reflow / 纯 GPU 合成)
+~/.dsh/profiles/<profile>/cordis.patch.yml
 ```
 
-### 1. 动态自适应的揭示引擎（Reveal Engine）
-- **分数级字符积分**：根据积压队列深度自适应调节速度（$v = 90 + \text{backlog}^{1.25} \times P$），低负载时从容自然，高积压时平稳追赶，绝不倾泻整段文本。
-- **折行限幅平滑**：长文本和代码块发生换行时，单帧视觉位移被限制在 8px 以内，将原本 24~28px 的单帧跳跃平摊至数帧完成。
-- **尾部平稳收束**：回合结束标记到达后，残余缓冲区以恒定速率释放，正文、思考链与工具调用之间自然衔接。
+对应 `id: think-box` 那一行（`name: '@local/dsh-think-box'`）。这些字段是 volatile 配置：保存后写入 profile 补丁，并由宿主 Loader 原地提交到运行中的插件，**不需要重启**，也不会重新挂载渲染器。若 profile 里没有可写的条目（例如未被 Loader 管理的环境），卡片会如实显示为只读。
 
-### 2. 纯合成层驱动的跟随引擎（Follow Engine）
-- **二阶阻尼物理系统**：采用 $k=130, c=24, m=1$ 的亚步进物理弹簧，将内容高度的变化转化为平滑连续的速度与位移轨迹。
-- **零重排（Zero-Reflow）位移补偿**：真实滚动容器始终锚定在底部，剩余的视觉滞后完全由外层 DOM 的 `transform: translate3d` 吸收。跟随过程不读写任何触发 Layout 的属性，杜绝重排风暴。
-- **闭环背压控制（Closed-Loop Backpressure）**：当跟随滞后接近预留空间时，反向向揭示引擎施加阻尼（最低降至 0.55 倍速），防止文本增长超出视口弹簧范围。
-- **掉帧自愈与跨刷新率一致**：主线程卡顿（Stall）时自动钳位物理时间（$\le 32\text{ms}$），避免画面恢复后的突进瞬移；在 60Hz 与 120Hz（ProMotion）屏幕下拥有近乎一致的物理收敛时间。
+### 翻译设置 → 独立文件
 
-### 3. 会话生命周期自动折叠（Turn Auto-Collapse）
-- 对话进行时，思考链与工具调用保持实时展开；
-- 回合结算完成并稳定后，自动将执行过程收敛为一行极简的 `已处理 X 秒` 摘要，保持工作区专注；支持随时点击无缝展开。
+翻译通道（后端、provider/model、reasoningEffort、目标语言、分片与超时、`autoTranslate`）不写入 profile 条目，而是保存在：
 
-### 4. 思考框内的可选机器翻译（Reasoning Translation）
-- 思考行右侧新增「查看译文 / 查看原文」切换：点一次开始翻译，流式过程中也会把已经完成的片段增量翻成界面语言，尚未完成的末尾保持原文；
-- 直接复用 Harness 官方「思考过程翻译」组合包的翻译服务与已保存结果，在插件页启用该组合包即可用；未启用时按钮不出现；
-- 只在你主动点「查看译文」之后才把思考内容发给所选翻译服务，翻译结果按 Session 保存，重新展开或刷新页面后可复用；
-- 打字机揭示与跟随滚动保持不变，翻译只替换思考框里显示的文字；随时可以切回原文。
-
-### 4.1 翻译后端（可选：官方组合包 / 任意模型路由）
-
-「查看译文」默认走官方「思考过程翻译」组合包（Google、Bing、DeepSeek 官方 API）。也可以让本插件直接调用任意已注册的 DSH 模型路由，例如免费的 OpenCode Go DeepSeek 4.1 Flash。配置写在插件自己的 `cordis.patch.yml`（组合包配置层）：
-
-```yaml
-translation:
-  backend: llm            # bundle = 官方组合包；llm = 本插件直连模型路由
-  provider: opencode-go
-  model: deepseek-v4.1-flash
-  reasoningEffort: low    # 路由不支持时自动降级到 low，再退回路由默认
-  targetLanguage: auto    # auto = 跟随界面语言
-  maxTextChars: 4000
-  maxTokens: 8192
-  timeoutMs: 60000
+```
+~/.dsh/think-box/translation.json
 ```
 
-- 这些字段现在也可以在**插件页 → 思维链显示增强 → 翻译通道**里直接改、点保存，立即生效，不用重启（保存在 `~/.dsh/think-box/translation.json`）。`cordis.patch.yml` 里的值只作为首次启动的种子。
-- `backend: bundle` 时 provider/model 不生效，按插件页里选的 Google / Bing / DeepSeek 官方 API 翻译。
-- `backend: llm` 时翻译请求由 Host 转发给模型路由，按 4000 字左右分片；免费额度与限流由该路由决定。
-- `autoTranslate` 默认开启：正在流式输出的思考块会边输出边逐段翻译；历史会话里的旧思考块仍需手动点「查看译文」，避免一打开旧会话就发大量请求。
-- `llm` 后端的译文只缓存在当前页面内存中，不写 Session 记录。
+`cordis.patch.yml` 里 `translation:` 块只作为**首次启动的种子**；之后以该文件为准。翻译结果按 Session 保存（`llm` 后端的译文只缓存在当前页面内存中，不写 Session 记录）。
 
 ---
 
-## 效果对比
+## 翻译隐私
 
-左：默认 Web UI。右：dsh-smooth-stream。
-
-![左：未使用插件。右：使用 dsh-smooth-stream。](docs/compare.gif)
-
----
-
-## 性能与基准
-
-平滑度与稳定性基于本地自动化审计台架验证：
-
-| 验证闸门 | 测试项目 | 指标要求 |
-| :--- | :--- | :--- |
-| **流式渲染审计** | `node scripts/run-render-audit.mjs` | 5 种典型生成场景下 10/10 Clean，零位移回退 |
-| **视口溢出闸门** | `node scripts/verify-overflow.mjs` | 极限输出场景下零过滚、零反弹 |
-| **尾行晃动抑制** | `pnpm test` | 单帧跳变 ≤30px，7 帧振幅峰值 ≤32px |
-
-- 核心 ESM 产物经 Gzip 压缩后仅约 **4.7 kB**。详见[工作原理与基准](https://laplace-bit.github.io/dsh-smooth-stream/how-it-works.html)。
+- 启用翻译并把思考内容发出去，意味着**这些文本会发送到你选择的翻译服务/模型路由**：`bundle` 后端发给官方组合包选中的服务（Google / Bing / DeepSeek 官方 API），`llm` 后端发给 `provider`/`model` 指定的路由。
+- 是否自动发送由翻译设置里的 **`autoTranslate`** 决定。本机随仓库 `cordis.patch.yml` 附带的默认值是 **开启**：正在流式输出的思考块会边输出边把已完成片段自动发出去；在插件页关掉它之后，只有手动点击「查看译文」才会发送。
+- **历史会话里的旧思考块始终手动**：即使 `autoTranslate` 开启，也要点了才会翻译。
+- 不需要翻译时请把翻译通道关掉/不要点击；插件本身不会把对话内容发给上述后端之外的任何地址。
 
 ---
 
-## 安装与使用
+## 兼容性
 
-在 DeepSeek Harness 源码根目录运行：
+- **实测内核：DSH `0.2.2-rc.5`（本机桌面版）**。本插件依赖若干**非公开接缝**，升级 DSH 后必须回归：
+  - 0.2.x 的 keyed Chat 行按 entry 独立渲染，插件用「替换内置 `assistant-step` 行的 component」接管，而不是低优先级 shadow；
+  - 0.2.x 会把同一个 assistant step 以 `groupPart` 拆成 reasoning / response 两行挂载，插件按 `groupPart` 过滤，避免重复渲染；
+  - 依赖 `data-conversation-scroll` 等 Harness DOM 约定测量滚动容器；
+  - 设置卡片走插件自己的 loopback RPC 通道；0.2.x 里 Connection 服务在插件作用域不可注入时，回退到 WebServer 直挂（仍受 loopback + 应用 token 约束）；
+  - 设置持久化走 0.2.x 的 `configEditor` + volatile 配置字段，旧版 `settings.register` 命名空间在 0.2.2 已不存在。
+- 上游 `dsh-smooth-stream` 已到 **0.8.0**，本分叉基于 **0.7.0**，尚未合并上游后续改动。
+- 不要对 `@deepseek-ai/*` 的**运行时符号**做静态导入（类型导入无妨）：宿主可能把裸导入重定向到自己的源码，宿主改名/删符号时会直接炸启动。本仓库只在 Host 半边使用 `schemastery`、在浏览器半边使用 Harness 的 slot/locale/连接契约。
+
+---
+
+## 已知问题
+
+- **回合结束后滚动或输入框位置异常的旧 bug 未结案**：根因仍未确认，排查记录与接手建议见 [`FIX-REPORT-2026-10-11.md`](FIX-REPORT-2026-10-11.md)。在上游侧也未合并修复，遇到时优先按该文档的「未解决的问题」排查。
+- **测试套件部分恢复**：当前全量 `269/297` 通过；剩余 28 条是流式几何/时序与对数淡出的既有失败（`stream` 18 条、`logarithmic-fade` 10 条），已登记待处理，**不是全绿**。
+- 插件页对「详情」里的相对链接按纯文本处理，文档内不依赖链接跳转。
+
+---
+
+## 开发
+
+本机不要用 `pnpm` 脚本（`pnpm install`/`prepare` 可能触发整树依赖重装并因无 TTY 中止），直接跑 `node_modules/.bin` 下的可执行文件：
 
 ```sh
-pnpm dsh plugin --profile web add dsh-smooth-stream
+./node_modules/.bin/tsc -p tsconfig.json --pretty false   # 类型检查
+./node_modules/.bin/vitest run                           # 全量测试（jsdom）
+./node_modules/.bin/tsdown                               # 构建 host + browser 产物到 lib/
+node scripts/check-lib-fresh.mjs                          # 确认 lib/ 比 src/client 新
 ```
 
-如果系统 `PATH` 中已有 `dsh`：
-
-```sh
-dsh plugin --profile web add dsh-smooth-stream
-```
-
-启动界面：
-
-```sh
-pnpm dsh web
-```
-
-Host 日志中显示 `[dsh-smooth-stream] plugin loaded!` 即表示已成功加载。
-
-卸载命令：`pnpm dsh plugin --profile web remove dsh-smooth-stream`。
+- Node 版本：`^22.19.0 || >=24`。
+- `lib/index.js` 是 Host 半边，`lib/client.js` 是浏览器 bundle；两者都由 `tsdown` 生成，**不要手改**。Host 通过 `lib/client.js` 的 boot 版本号提供浏览器代码，改完源码需要重新构建并刷新/重启宿主。
+- 测试替身在 `tests/shims/`：`client-runtime.ts` / `client-locale.ts` 镜像宿主浏览器包的契约（真实包是 `window.__ModuleLoader__` 形式的预构建 bundle，无法在 Vitest 里直接 import）。
+- `./node_modules/.bin/vitest run <file>` 可单跑某个测试文件；重跑全量确认没有新增失败（当前基线 269/297）。
+- 可选：`node scripts/run-stream-benchmark.mjs` 记录流式引擎基准；`benchmarks/` 放基准用的 harness。
 
 ---
 
-## 内核兼容性
+## 目录结构
 
-| DSH 内核 | 本插件支持情况 |
-|---|---|
-| 0.1.0-rc.5 ～ 0.1.0-rc.7 | ✅ 全部版本 |
-| 0.1.1-rc.2 | ✅ 全部版本 |
-| 0.1.2-alpha.1 ～ 0.1.2-alpha.3 | ✅ 0.4.3 起；0.4.2 及更早版本因静态导入已移除的助手而在 0.1.2 上加载失败 |
-| 0.2.1-rc.1（本机 2026-10-17 实测） | ✅ 渲染/滚动/思考窗正常；配置页改由侧栏「插件」页的 `plugins.bundle.config` 槽位承载（旧版 `settings.plugin.item` 注册保留兼容） |
-
-- ✅ = 兼容。`0.1.2-alpha.3` 为当前宿主内核，已实测（产物导入 + 测试套件）；其余内核按双内核兼容设计支持（同一份构建、同一 API 面）。该行保留为 fork 时的上游记录；本机当前内核是 **0.2.1-rc.1**。
-- **0.2.1 起插件配置从「设置」搬到侧栏「插件」页**：壳把官方插件与 profile 组合包的配置页放在插件页，设置里只留只读清单。本插件的配置卡片因此注册到 `plugins.bundle.config`（`key: '@local/dsh-think-box'`，显示在组合包页面的描述与行之间），旧的 `settings.plugin.item` 注册保留，旧内核上照旧显示。
-- **0.1.2 起内核移除了 `settingsNamespace()` 运行时助手**（≤ 0.1.1 上它只是个校验恒等函数，0.1.2 仅保留同名类型）。本插件不静态导入该符号，而是在注册设置命名空间时本地内联常量并断言为 `SettingsNamespace` 类型，新旧内核通用。
-- 0.4.3 起不再静态导入 `settingsNamespace()`（见 git 历史中的兼容修复）；更早版本仅在 ≤ 0.1.1 内核上可用。
-- **不要对 `@deepseek-ai/*` 包的运行时符号做静态导入**。宿主 CLI 经 `node --import tsx/esm` 启动，tsx 会应用宿主 `tsconfig` 的 `paths` 映射，外部插件对 `@deepseek-ai/*` 的裸导入可能被重定向进宿主源码，一旦宿主侧改名/删符号就会以模块实例化错误的形式炸掉启动。类型导入（`import type`）不受影响。
-
-## 配置与手感预设
-
-插件默认采用 `preset: balanced`。如需切换手感，可在对应 profile 的 `cordis.patch.yml` 中修改：
-
-| `preset` | 动态特性 |
-| :--- | :--- |
-| `realtime` | 紧跟模型分块到达节奏，缓冲更小 |
-| `balanced` | 默认推荐，兼顾阅读流畅度与响应延迟 |
-| `silky` | 增大缓冲区，追赶更平缓柔和 |
+```
+src/                 Host 半边（插件入口、配置、设置 RPC、翻译桥）
+src/client/          浏览器半边（React 组件、hook、locales、CSS Modules）
+tests/                Host/client 测试（*.host.spec.tsx / *.client.spec.tsx）
+tests/shims/          Vitest 用的宿主包替身
+locale/               插件元数据与插件页文案（meta.detail 指向 docs/DETAIL.md）
+docs/DETAIL.md        插件页「详情」文档
+cordis.patch.yml      作为 bundle 时注入的默认配置层
+scripts/              基准、诊断与诊断脚本（开发用）
+benchmarks/           流式引擎基准 harness
+lib/                  构建产物（生成，勿手改）
+```
 
 ---
 
-## 用户偏好设置
+## 上游与许可
 
-在 Web 界面打开 **侧栏「插件」→ `@local/dsh-think-box` 组合包详情**（0.2.0 及更早：**设置 → 插件 → 插件配置**），可对 **丝滑流式（Smooth stream）** 卡片进行个性化调节：
+本仓库修改自 [Laplace-bit/dsh-smooth-stream](https://github.com/Laplace-bit/dsh-smooth-stream)（v0.7.0，MIT）。上游的流式揭示/跟随引擎、动画与部分测试仍被沿用；本分叉在其上重做了思考框、接入了思考翻译，并把设置迁移到 0.2.x 的 profile 配置机制。
 
-- **启用丝滑流式渲染**（默认开启）：接管回复和工具行的渲染与跟随；关闭后即时恢复 Harness 内置渲染。
-- **自动展开思考**：流式生成期间是否自动展开思考过程。
-- **对数淡入**（默认开启）：回答正文和展开的思考内容中，尾部范围随输出速度从 24 扩展到最多 160 个字素，从 0% 不透明度在 240ms 内按反向对数曲线变实（前段更通透，后段变实）。网络停顿时也会恢复清晰；关闭此项保留逐字输出与滚动。遵循动效偏好，跳过代码、公式和思考摘要，不支持文字范围着色的浏览器自动使用原有输出效果。
-- **完成后自动折叠**（默认开启）：回合处理完成后，将思考过程与工具调用折叠为摘要行。
-- **显示渲染调试面板**（默认关闭）：在界面右侧开启实时 HUD，观测 FPS、字符积压、弹性曲线并微调物理参数。
-
-本地淡入预览：执行 `pnpm build:repro`，在仓库根目录启动 `python3 -m http.server 8765 --bind 127.0.0.1`，打开 `http://127.0.0.1:8765/repro/index.html?demo=fade`。预览包含暂停、停止、深浅主题、高速分片和代码/公式保护样例，复用真实输出引擎，富文本为测试样例。
-
-执行 `node scripts/verify-logarithmic-fade.mjs` 可验证并录制预览（需要 Chrome 和 `pnpm exec playwright-core install ffmpeg`；其他 Chrome 路径可用 `CHROME_BIN` 指定），报告与视频保存在未跟踪的 `repro/artifacts/logarithmic-fade/`。
-
----
-
-## 许可证
-
-[MIT](LICENSE)
+以 MIT 许可发布，详见 [LICENSE](LICENSE)。上游版权归其原作者所有，本分叉的修改同样以 MIT 提供。

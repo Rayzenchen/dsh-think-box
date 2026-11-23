@@ -12,14 +12,6 @@
   "engines": {
     "node": "^22.19.0 || >=24.0.0"
   },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/Laplace-bit/dsh-smooth-stream.git"
-  },
-  "bugs": {
-    "url": "https://github.com/Laplace-bit/dsh-smooth-stream/issues"
-  },
-  "homepage": "https://laplace-bit.github.io/dsh-smooth-stream/",
   "keywords": [
     "dsh-plugin",
     "deepseek-harness",
@@ -27,19 +19,11 @@
     "dsh",
     "cordis",
     "streaming",
-    "smooth-streaming",
-    "fluid-streaming",
-    "streaming-renderer",
-    "markdown-streaming",
     "smooth-scrolling",
-    "smooth-scroll",
-    "smooth-stream",
     "typewriter",
-    "typewriter-effect",
-    "markdown",
+    "reasoning",
+    "translation",
     "chat-ui",
-    "web-ui",
-    "plugin",
     "react"
   ],
   "main": "lib/index.js",
@@ -65,6 +49,7 @@
     "cordis.patch.yml",
     "README.md",
     "README.en.md",
+    "docs",
     "LICENSE",
     "locale"
   ],

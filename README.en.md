@@ -1,186 +1,151 @@
-# dsh-smooth-stream
+# Reasoning display enhancement (@local/dsh-think-box)
 
-> **Transform jumpy AI outputs into a calm, teleprompter-smooth reading experience.**  
-> Physics-based stream rendering and zero-reflow viewport tracking for the DeepSeek Harness (`dsh`) Web UI.
+A local fork of a DeepSeek Harness (`dsh`) browser plugin. It is forked from [Laplace-bit/dsh-smooth-stream](https://github.com/Laplace-bit/dsh-smooth-stream) at upstream **v0.7.0** and does not track upstream releases (upstream is at 0.8.0; those changes are unmerged here).
 
-English · [中文](README.md) · [Homepage](https://laplace-bit.github.io/dsh-smooth-stream/) · [How It Works](https://laplace-bit.github.io/dsh-smooth-stream/how-it-works.html) · [npm](https://www.npmjs.com/package/dsh-smooth-stream)
+Three layers sit on top of the upstream streaming engine:
 
----
+1. **Reasoning box** — the model's thinking is a permanent multi-line box beside the Think row instead of a collapsed disclosure.
+2. **Smooth streaming** — per-character reveal for answer text plus damped viewport follow, so bursts do not jump the page.
+3. **Reasoning translation** — optional translation of reasoning text via the official cot-translation bundle or any registered model route.
 
-## The Silky Smooth Feel
-
-Whether reviewing hundreds of lines of complex reasoning or watching fast-paced code generation, `dsh-smooth-stream` delivers a **calm, continuous, and fatigue-free** reading experience:
-
-- **Organic, fluid text expansion**: No more walls of text abruptly snapping onto your screen. Words glide in with an organic rhythm that feels alive yet unhurried.
-- **Effortless eye tracking**: The viewport glides as if on a precision-damped rail. Line wraps and code blocks no longer jar your eyes, eliminating cognitive friction.
-- **Adaptive cadence**: Leisurely during slow arrivals, smoothly accelerating during high-volume bursts—keeping your screen composed no matter how fast tokens arrive.
+[简体中文](README.md) · [Plugin-page detail](docs/DETAIL.md)
 
 ---
 
-## Why this exists
+## Features
 
-Large language models emit tokens in discrete network bursts: hundreds of characters can arrive within milliseconds, followed by tens of milliseconds of silence.
+### 1. Inline reasoning box
 
-Traditional chat UIs bind DOM rendering and scrolling directly to arrival events, causing two jarring failure modes:
-1. **Visual snapping**: Text blocks, tables, and code snippets pop in abruptly, forcing the reader's eye to constantly re-acquire focus.
-2. **Scroll jitter and reflow storms**: Hard `scrollTop = scrollHeight` jumps or interrupted `scroll-behavior: smooth` animations restart their easing curves on every chunk, leading to sluggish lag and severe layout thrashing.
+- While streaming, reasoning text appears in a multi-line box beside the Think row; by default it occupies three lines and does not inflate the transcript.
+- Click the Think row to open the full reasoning body below it (up to 18 lines, shrinking to fit shorter content); click again to collapse.
+- When thinking ends the box performs one settle flourish: follow to the latest line, hold briefly, glide back to the first line, then collapse to a single line.
+- Reasoning from restored history never replays the flourish; it renders in its settled one-line state.
 
-`dsh-smooth-stream` decouples **text reveal cadence** from **viewport motion** into two independent dynamical systems, integrating them per animation frame (`requestAnimationFrame`) to ensure uninterrupted continuity.
+### 2. Smooth answer text
+
+- Reveal cadence and viewport motion are separate state machines: text is revealed at an arrival-tracking rate and the viewport follows with damping instead of `scrollTop = scrollHeight` jumps.
+- Reveal applies backpressure when the follower cannot keep up, so text does not run out of the visible area.
+- Pacing preset: `realtime` (closest to arrival), `balanced` (default), `silky` (smoothest).
+- **Logarithmic fade** fades new tail text into its original colour; code, math and reasoning summaries are skipped, and browsers without range-based highlighting fall back to plain rendering.
+- **Render diagnostics** is off by default; enabling it shows live FPS, backlog and follow-lag metrics on the right side of the chat.
+
+### 3. Reasoning translation (optional)
+
+- A "Show translation / Show original" toggle appears on the Think row. Translation only replaces the text shown in the reasoning box; reveal and follow are unchanged.
+- Two backends:
+  - `bundle`: the official "reasoning translation" bundle (Google / Bing / native DeepSeek APIs); the bundle must be enabled on the Plugins page;
+  - `llm`: the plugin's Host half forwards to any registered DSH model route (for example the free OpenCode Go DeepSeek 4.1 Flash), in roughly 4000-character chunks.
+- Streaming blocks translate finished fragments incrementally while the unterminated tail stays in the original language; historical blocks are manual.
 
 ---
 
-## Architecture & Mechanics
+## Install and enable (this machine)
+
+This machine does not install the package from npm; the repository is linked into the `desktop` profile:
+
+1. The profile `package.json` dependency points at this checkout:
+   ```json
+   { "@local/dsh-think-box": "link:/Users/wench/Documents/DS Harness/dsh-think-box-plugin" }
+   ```
+2. The package appears in the profile's `dsh.profile.bundles` list; the repository's `cordis.patch.yml` supplies its default config.
+3. After starting/refreshing DSH Web, open the **Plugins page in the sidebar**, find "Reasoning display enhancement (@local/dsh-think-box)" and enable it. Turning its master switch off hands rendering back to the built-in Harness UI.
+
+The Host log line `[dsh-think-box] plugin loaded!` means the Host half is loaded.
+
+---
+
+## Settings and storage (two separate places)
+
+### Card switches → profile entry config
+
+The switches on the "Reasoning display enhancement" card (enable smooth streaming, take over scrolling, pacing preset, motion preference, auto-expand thinking, logarithmic fade, render diagnostics and its tuning) are editable and persisted in the profile entry config:
 
 ```
-[ Model SSE Stream ]
-         │
-         ▼
- ┌─────────────────┐       Backpressure Damping (0.55x ~ 1.0x)       ┌─────────────────┐
- │  Reveal Engine  │ ◄────────────────────────────────────────────── │  Follow Engine  │
- └────────┬────────┘                                                 └────────┬────────┘
-          │ Fractional character debt integration                             │ 2nd-order damped spring (k=130, c=24)
-          ▼                                                                   ▼
- [ Progressive DOM Reveal ] ────────────────────────────────────────► [ GPU Compositor Transform ]
-  (Per-frame visual delta ≤ 8px)                                       (Zero Reflow / Pure Composite)
+~/.dsh/profiles/<profile>/cordis.patch.yml
 ```
 
-### 1. Dynamic Adaptive Reveal Engine
-- **Fractional character debt**: Evaluates reveal velocity from current backlog ($v = 90 + \text{backlog}^{1.25} \times P$). Leisurely when arrival is slow; accelerates smoothly during bursts without ever dumping text walls.
-- **Wrap smoothing**: Caps per-frame visual displacement to $\le 8\text{px}$ during line wraps and new block arrivals, spreading sudden $24\text{--}28\text{px}$ layout steps across several frames.
-- **Uniform completion drain**: When the generation finishes, the residual queue drains at a steady speed, creating clean transitions between body, reasoning, and tool calls.
+in the `id: think-box` row (`name: '@local/dsh-think-box'`). These are volatile config fields: saving writes the profile patch and the host Loader commits the values into the running plugin **without a restart** and without remounting the renderer. On a profile where no writable entry exists (for example, an environment not managed by the Loader), the card honestly reports itself as read-only.
 
-### 2. GPU-Driven Damped Spring Follower
-- **Second-order spring physics**: Uses a sub-stepped damped spring ($k=130, c=24, m=1$) to convert discrete height changes into a continuous trajectory.
-- **Zero-reflow viewport tracking**: Keeps the real scrollport pinned to the bottom while absorbing residual visual lag entirely via `transform: translate3d` on the message container. No layout-triggering properties are touched during follow.
-- **Closed-loop backpressure**: If visual lag fills the predictive runway ($\approx 72\text{px}$), the follower throttles reveal speed (down to $0.55\times$), ensuring text expansion never outpaces the viewport spring.
-- **Stall resilience & ProMotion parity**: Clamps elapsed physical time ($\Delta t \le 32\text{ms}$) during main-thread stalls to prevent teleporting catches. Settling dynamics are identical across 60Hz and 120Hz (ProMotion) displays.
+### Translation settings → separate file
 
-### 3. Turn Lifecycle Auto-Collapse
-- Reasoning and tool executions remain expanded while streaming.
-- Once a turn settles, intermediate processes cleanly fold behind a minimalist `Processed in Xs` summary row, keeping the conversation view focused on final answers.
+The translation channel (backend, provider/model, reasoningEffort, target language, chunk limits, timeouts, `autoTranslate`) is not stored in the profile entry; it lives in:
 
-### 4. Optional Reasoning Translation
-- A `Translate / Original` control on the Think row switches the box to a translated feed; completed fragments are translated incrementally while the model is still streaming, and the unfinished tail stays in the original language.
-- It reuses the Harness reasoning-translation bundle's provider and saved results: enable that bundle on the Plugins page and the control appears; with the bundle off it stays hidden.
-- Nothing leaves the machine until the reader clicks `Translate`, and finished translations are saved per Session, so re-expanding or reloading reuses them.
-- The typewriter reveal and follow scrolling keep running; translation only changes the text the box displays, and `Original` switches back instantly.
-
-### 4.1 Translation backend (official bundle or any model route)
-
-`Translate` uses the official reasoning-translation bundle by default (Google, Bing, DeepSeek official API). The plugin can instead call any registered Harness LLM route directly — for example a free OpenCode Go DeepSeek 4.1 Flash. Configure it in the plugin's own `cordis.patch.yml` (bundle config layer):
-
-```yaml
-translation:
-  backend: llm            # bundle = official bundle; llm = direct model route
-  provider: opencode-go
-  model: deepseek-v4.1-flash
-  reasoningEffort: low    # falls back to low, then the route default, when unsupported
-  targetLanguage: auto    # auto follows the UI language
-  maxTextChars: 4000
-  maxTokens: 8192
-  timeoutMs: 60000
+```
+~/.dsh/think-box/translation.json
 ```
 
-- These fields can also be edited directly under **Plugins page → Reasoning display enhancement → Translation channel** and saved without a restart (stored in `~/.dsh/think-box/translation.json`). The values in `cordis.patch.yml` only seed the first launch.
-- With `backend: bundle`, provider/model are ignored and the bundle's Google / Bing / DeepSeek official API selection applies.
-- With `backend: llm`, the Host forwards ~4000-character fragments to the model route; free quota and rate limits are the route's own.
-- `autoTranslate` is on by default: a live reasoning block translates while it streams. Historical blocks still need the toggle, so opening an old conversation does not fan out a burst of requests.
-- The `llm` backend caches translations in page memory only and does not write Session records.
+The `translation:` block in `cordis.patch.yml` only seeds the first launch; afterwards that file is the source of truth. Translation results are kept per Session (`llm` translations are kept in page memory only and are not written to the Session record).
 
 ---
 
-## Visual Comparison
+## Translation privacy
 
-Left: default Web UI. Right: dsh-smooth-stream.
-
-![Left: default Web UI. Right: dsh-smooth-stream.](docs/compare.gif)
-
----
-
-## Performance & Test Benchmarks
-
-Verified by local browser-level audit suites:
-
-| Gate | Command | Passing Standard |
-| :--- | :--- | :--- |
-| **Stream Render Audit** | `node scripts/run-render-audit.mjs` | 10/10 clean across 5 streaming patterns; zero regressions |
-| **Overflow & Rebound Gate** | `node scripts/verify-overflow.mjs` | Zero over-scroll, zero bounce under burst load |
-| **Tail Vibration Probe** | `pnpm test` | Single-frame shift $\le 30\text{px}$, 7-frame amplitude $\le 32\text{px}$ |
-
-- Core ESM bundle is approximately **4.7 kB** (gzipped). See [How It Works](https://laplace-bit.github.io/dsh-smooth-stream/how-it-works.html) for full benchmarks.
+- Enabling translation and sending reasoning text means **that text is sent to the translation service or model route you selected**: `bundle` sends it to the selected official service (Google / Bing / native DeepSeek APIs), `llm` sends it to the configured `provider`/`model`.
+- Automatic sending is governed by the **`autoTranslate`** setting. The default shipped in this repository's `cordis.patch.yml` is **on**: while reasoning streams, finished fragments are sent automatically. Turn it off on the Plugins page and translation is sent only when you click "Show translation".
+- **Historical reasoning blocks are always manual**, even with `autoTranslate` on.
+- If you do not want translation, leave the translation channel off or simply do not click the toggle. The plugin sends conversation content nowhere else.
 
 ---
 
-## Quick Start
+## Compatibility
 
-### Installation
+- **Tested kernel: DSH `0.2.2-rc.5` (local desktop app).** The plugin relies on several **non-public seams**; re-regress after every DSH upgrade:
+  - 0.2.x renders each keyed Chat entry as its own seat, so the plugin swaps the built-in `assistant-step` row's component in place instead of shadowing it at a lower priority;
+  - 0.2.x mounts the same assistant step twice via `groupPart` (reasoning / response rows); the plugin filters by `groupPart` to avoid duplicate rendering;
+  - it depends on Harness DOM conventions such as `data-conversation-scroll` to measure the conversation scroller;
+  - the settings card uses the plugin's own loopback RPC channel; where the Connection service is not injectable from a plugin scope on 0.2.x, it falls back to a directly registered WebServer route (still behind loopback + the app token);
+  - settings persistence uses the 0.2.x `configEditor` plus volatile config fields; the old `settings.register` namespace no longer exists in 0.2.2.
+- Upstream `dsh-smooth-stream` is at **0.8.0**; this fork is based on **0.7.0** and has not merged later upstream work.
+- Do not statically import **runtime symbols** from `@deepseek-ai/*` (type imports are fine): the host may redirect bare imports into its own source, and a host rename/removal then breaks startup. This repository only uses `schemastery` on the Host side and the Harness slot/locale/connection contracts on the browser side.
 
-Inside your DeepSeek Harness repository checkout:
+---
+
+## Known issues
+
+- **The old post-turn scrolling / composer-position bug is still unresolved**: the root cause is unconfirmed; investigation notes and hand-off suggestions are in [`FIX-REPORT-2026-10-11.md`](FIX-REPORT-2026-10-11.md). It is also unfixed upstream; follow that document's "unresolved" section first when it reproduces.
+- **The test suite is only partially restored**: the current full run is `269/297`; the remaining 28 are pre-existing streaming geometry/timing and logarithmic-fade failures (`stream` 18, `logarithmic-fade` 10). They are tracked, not green.
+- Relative links inside the Plugins-page detail document are rendered as plain text, so the docs do not rely on link navigation.
+
+---
+
+## Development
+
+Do not use the `pnpm` scripts on this machine (`pnpm install`/`prepare` can trigger a full dependency reinstall and abort without a TTY). Run the executables under `node_modules/.bin` directly:
 
 ```sh
-pnpm dsh plugin --profile web add dsh-smooth-stream
+./node_modules/.bin/tsc -p tsconfig.json --pretty false   # type check
+./node_modules/.bin/vitest run                           # full suite (jsdom)
+./node_modules/.bin/tsdown                               # build Host + browser bundles into lib/
+node scripts/check-lib-fresh.mjs                          # verify lib/ is newer than src/client
 ```
 
-If `dsh` is in your system `PATH`:
-
-```sh
-dsh plugin --profile web add dsh-smooth-stream
-```
-
-Start the interface:
-
-```sh
-pnpm dsh web
-```
-
-Verify that `[dsh-smooth-stream] plugin loaded!` appears in the host startup logs.
-
-To uninstall: `pnpm dsh plugin --profile web remove dsh-smooth-stream`.
+- Node: `^22.19.0 || >=24`.
+- `lib/index.js` is the Host half and `lib/client.js` the browser bundle; both are generated by `tsdown` — never edit them by hand. The Host serves the browser half from `lib/client.js` under a boot revision, so after changing sources rebuild and refresh/restart the host.
+- Test doubles live in `tests/shims/`: `client-runtime.ts` / `client-locale.ts` mirror the host browser packages (the real packages are prebuilt `window.__ModuleLoader__` bundles and cannot be imported directly in Vitest).
+- `./node_modules/.bin/vitest run <file>` runs one suite; re-run the full suite to confirm no new failures (current baseline 269/297).
+- Optional: `node scripts/run-stream-benchmark.mjs` records stream-engine benchmarks; `benchmarks/` holds the harness.
 
 ---
 
-## Kernel Compatibility
+## Layout
 
-| DSH kernel | This plugin |
-|---|---|
-| 0.1.0-rc.5 - 0.1.0-rc.7 | ✅ all versions |
-| 0.1.1-rc.2 | ✅ all versions |
-| 0.1.2-alpha.1 - 0.1.2-alpha.3 | ✅ 0.4.3+; 0.4.2 and earlier fail to load on 0.1.2 because they statically import the removed helper |
-| 0.2.1-rc.1 (verified live on 2026-10-17) | ✅ streaming/scroll/think box fine; the configuration card now rides the sidebar Plugins page's `plugins.bundle.config` slot (the legacy `settings.plugin.item` registration stays for older kernels) |
-
-- ✅ = compatible. `0.1.2-alpha.3` is the current host kernel and has been verified live (built-artifact import + test suites); the remaining kernels are covered by the dual-kernel-compatible design (one build, one API surface). That row is the upstream record at fork time; this machine now runs **0.2.1-rc.1**.
-- **Since 0.2.1 plugin configuration moved from Settings onto the sidebar Plugins page**: the shell keeps official-plugin and profile-bundle configuration there and leaves Settings to a read-only inventory. This plugin therefore registers its card into `plugins.bundle.config` (`key: '@local/dsh-think-box'`, rendered between the bundle description and its rows), while the old `settings.plugin.item` registration stays for older kernels.
-- **Kernel 0.1.2 removed the `settingsNamespace()` runtime helper** (on ≤ 0.1.1 it was a validating identity function; 0.1.2 keeps only the same-named type). This plugin does not statically import that symbol any more — it inlines its namespace constant locally and asserts it as the `SettingsNamespace` type, which works on both old and new kernels.
-- Since 0.4.3 the plugin no longer statically imports `settingsNamespace()` (see the compat fix in git history); older versions only work on kernels ≤ 0.1.1.
-- **Never statically import runtime symbols from `@deepseek-ai/*` packages.** The host CLI starts via `node --import tsx/esm`, and tsx applies the host `tsconfig` `paths` mapping, so a bare `@deepseek-ai/*` import from an external plugin may be redirected into the host's own sources — any host-side rename or removal then explodes at boot as a module instantiation error. Type-only imports (`import type`) are unaffected.
-
-## Presets & Configuration
-
-The plugin defaults to `preset: balanced`. You can tune the cadence in your profile's `cordis.patch.yml`:
-
-| `preset` | Characteristics |
-| :--- | :--- |
-| `realtime` | Low buffer; closely follows model token arrival |
-| `balanced` | Recommended default; balances smoothness and latency |
-| `silky` | Generous buffer with gentler acceleration curves |
+```
+src/                 Host half (plugin entry, config, settings RPC, translation bridge)
+src/client/          Browser half (React components, hooks, locales, CSS Modules)
+tests/               Host/client suites (*.host.spec.tsx / *.client.spec.tsx)
+tests/shims/         Host-package doubles for Vitest
+locale/              Plugin metadata and Plugins-page copy (meta.detail -> docs/DETAIL.md)
+docs/DETAIL.md       Plugins-page "detail" document
+cordis.patch.yml     Default config layer injected when loaded as a bundle
+scripts/             Benchmarks, diagnostics and dev probes
+benchmarks/          Streaming-engine benchmark harness
+lib/                 Build output (generated, do not edit)
+```
 
 ---
 
-## User Preferences
+## Upstream and license
 
-Open **sidebar Plugins → `@local/dsh-think-box` bundle page** in the Web UI (on 0.2.0 and earlier: **Settings → Plugins → Plugin Configuration**) to tune the **Smooth stream** card:
+This repository is modified from [Laplace-bit/dsh-smooth-stream](https://github.com/Laplace-bit/dsh-smooth-stream) (v0.7.0, MIT). The upstream reveal/follow engine, animations and parts of the tests are still used; this fork rebuilt the reasoning box, added reasoning translation, and moved settings onto the 0.2.x profile-config mechanism.
 
-**Logarithmic fade** (on by default) adapts the tail from 24 to at most 160 graphemes according to reveal speed, fading answers and expanded thinking from 0% opacity over 240ms with a reversed logarithmic curve that stays translucent longer. Text settles even during network pauses. Turning it off preserves text pacing and scrolling. It follows the motion preference and skips code, formulas and thinking summaries. Browsers without text-range highlighting support retain the existing reveal behavior.
-
-For a local preview, run `pnpm build:repro`, serve the repository with `python3 -m http.server 8765 --bind 127.0.0.1`, and open `http://127.0.0.1:8765/repro/index.html?demo=fade`. This uses the real reveal/fade hooks with synthetic rich-text fixtures. Run `node scripts/verify-logarithmic-fade.mjs` to check and record it (Chrome and `pnpm exec playwright-core install ffmpeg` required; override the Chrome path with `CHROME_BIN`). Reports and recordings go to the ignored `repro/artifacts/logarithmic-fade/` directory.
-
-- **Enable smooth streaming** (default on): Toggles custom stream rendering and follow. Disabling instantly falls back to built-in Harness rendering.
-- **Auto-expand thinking**: Controls whether reasoning opens automatically while streaming.
-- **Collapse finished work** (default on): Folds thoughts and tool steps into a summary line once the turn settles.
-- **Show render diagnostics** (default off): Opens a live HUD on the right side to inspect FPS, character backlog, spring state, and adjust physical parameters in real time.
-
----
-
-## License
-
-[MIT](LICENSE)
+Released under the MIT license; see [LICENSE](LICENSE). Upstream copyright belongs to its original authors, and this fork's changes are provided under the same MIT terms.

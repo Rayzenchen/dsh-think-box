@@ -2,7 +2,7 @@
 
 A local DeepSeek Harness (`dsh`) browser plugin that puts the model's reasoning into an inline box beside the Think row, with optional reasoning translation. It was originally forked from an upstream project (historical attribution at the end).
 
-The plugin does exactly two things: **the reasoning box** and **reasoning translation**. The answer body is rendered by Harness itself.
+The plugin does exactly two things: **the reasoning box** and **reasoning translation**. The answer body gets no plugin effects — no per-character reveal, viewport follow, scroll takeover or fade; Harness renders it directly with its Markdown components. The built-in `assistant-step` row is swapped only to host the reasoning box.
 
 ---
 

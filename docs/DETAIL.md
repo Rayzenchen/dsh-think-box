@@ -1,6 +1,6 @@
 # 思维链显示增强
 
-本插件只做两件事：**行内思考框**与**思考翻译**。正文由 Harness 自身渲染，插件不接管正文、视口滚动或调试面板。
+本插件只做两件事：**行内思考框**与**思考翻译**。答案正文不做任何插件特效（无逐字揭示、视口跟随、滚动接管、淡入），直接由 Harness 的 Markdown 组件渲染；替换内置 `assistant-step` 行只是为了承载思考框。
 
 ## 功能
 
@@ -25,7 +25,7 @@
 
 ## 已知限制
 
-- 旧「回合结束后滚动/输入框位置异常」问题作为历史记录保留在仓库 `FIX-REPORT-2026-10-11.md`；插件已不接管正文与滚动，不再参与该路径。
+- 旧「回合结束后滚动/输入框位置异常」问题作为历史记录保留在仓库 `FIX-REPORT-2026-10-11.md`；插件不再改动正文与滚动，不再参与该路径。
 - 翻译只覆盖思考框。
 - 当前全量测试 `129/129` 通过，无 skip。
 
@@ -33,6 +33,6 @@
 
 ## English summary
 
-A reasoning-box and reasoning-translation plugin only; Harness renders the answer. The box shows a three-line inline preview, opens an 18-line body on click, and plays a one-shot settle flourish (never on restored history). Reasoning reveal uses one fixed balanced cadence; the logarithmic fade is always on and both are skipped under OS reduced motion. Translation supports the official reasoning-translation bundle or any registered DSH model route, translating finished fragments while streaming and keeping the tail in the original language.
+A reasoning-box and reasoning-translation plugin only. The answer gets no plugin effects (no reveal, follow, scroll takeover or fade) and is rendered directly by Harness Markdown components; the `assistant-step` swap exists only to host the reasoning box. The box shows a three-line inline preview, opens an 18-line body on click, and plays a one-shot settle flourish (never on restored history). Reasoning reveal uses one fixed balanced cadence; the logarithmic fade is always on and both are skipped under OS reduced motion. Translation supports the official reasoning-translation bundle or any registered DSH model route, translating finished fragments while streaming and keeping the tail in the original language.
 
 `enabled` and `thinkAutoExpand` persist in the profile entry config (`~/.dsh/profiles/<profile>/cordis.patch.yml`, `id: think-box`, volatile — applied live); translation settings persist in `~/.dsh/think-box/translation.json`. Enabling translation sends reasoning text to the selected service/route; `autoTranslate` controls automatic sending (repository seed on, effective value from the local file). Tested on DSH 0.2.2-rc.5; the plugin depends on non-public seams (assistant-step swap, `groupPart`, `turnProcess` fold, connection RPC, volatile config + `configEditor`) and must be regressed after upgrades. The suite is 129/129 green.

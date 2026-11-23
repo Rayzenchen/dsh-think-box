@@ -12,6 +12,9 @@
 import { randomUUID } from 'node:crypto'
 import {
   TRANSLATION_RPC,
+  type TranslationCatalog,
+  type TranslationCatalogFailure,
+  type TranslationCatalogProvider,
   type TranslationRoutePlan,
   type TranslationRouteRequest,
 } from './translation-protocol.ts'
@@ -60,10 +63,38 @@ interface PreparedLlmCall {
   stream(options: Record<string, unknown>): AsyncIterable<LlmStreamChunk>
 }
 
+/** One provider row the catalog reader consumes. */
+export interface LlmProviderLike {
+  readonly id: string
+  readonly name?: string | undefined
+}
+
+/** One model row the catalog reader consumes. */
+export interface LlmModelLike {
+  readonly id: string
+  readonly name?: string | undefined
+  readonly description?: string | undefined
+  /** Absent means unknown; an explicit list must contain `text` to be offered. */
+  readonly inputModalities?: readonly string[] | undefined
+}
+
+/** Exact-model metadata subset used for reasoning levels. */
+export interface LlmResolvedModelLike {
+  readonly reasoning?: {
+    readonly efforts: readonly {
+      readonly id: string
+      readonly name: string
+      readonly description?: string | undefined
+    }[]
+    readonly defaultEffort?: string | undefined
+  } | undefined
+}
+
 /** Structural slice of the Harness `llm` service used by this bridge. */
 export interface LlmServiceLike {
-  listProviders(): readonly { readonly id: string }[]
-  listModels(provider: string): Promise<readonly { readonly id: string }[]>
+  listProviders(): readonly LlmProviderLike[]
+  listModels(provider: string): Promise<readonly LlmModelLike[]> | readonly LlmModelLike[]
+  resolveModelInfo?(provider: string, model: string, signal?: AbortSignal): Promise<LlmResolvedModelLike>
   prepareCall(
     config: {
       readonly provider: string
@@ -287,6 +318,101 @@ export function createLlmTranslationRoute(
   }
 }
 
+/**
+ * Build the provider → model → reasoning directory the translation picker
+ * renders.
+ *
+ * A provider whose model list rejects is recorded as a failure and skipped; a
+ * model whose exact metadata rejects stays selectable without reasoning levels
+ * and is recorded too. One bad row must never empty the whole picker.
+ * @param llm - Harness LLM service slice.
+ * @param signal - caller cancellation.
+ * @returns the text-model catalog plus sanitized failure entries.
+ */
+export async function buildTranslationCatalog(
+  llm: LlmServiceLike,
+  signal: AbortSignal,
+): Promise<TranslationCatalog> {
+  const providers: TranslationCatalogProvider[] = []
+  const failures: TranslationCatalogFailure[] = []
+  for (const provider of llm.listProviders()) {
+    signal.throwIfAborted()
+    let models: readonly LlmModelLike[]
+    try {
+      models = await Promise.resolve(llm.listModels(provider.id))
+      signal.throwIfAborted()
+    } catch (error) {
+      if (signal.aborted) throw error
+      failures.push({ provider: provider.id, message: 'provider catalog is unavailable' })
+      continue
+    }
+    const catalogModels: TranslationCatalogProvider['models'][number][] = []
+    for (const model of models) {
+      signal.throwIfAborted()
+      if (model.inputModalities !== undefined && !model.inputModalities.includes('text')) continue
+      let reasoning: TranslationCatalogProvider['models'][number]['reasoning']
+      if (typeof llm.resolveModelInfo === 'function') {
+        try {
+          const resolved = await llm.resolveModelInfo(provider.id, model.id, signal)
+          signal.throwIfAborted()
+          const metadata = resolved.reasoning
+          if (metadata !== undefined) {
+            reasoning = {
+              efforts: metadata.efforts.map(effort => ({
+                id: String(effort.id),
+                name: effort.name,
+                ...(effort.description === undefined ? {} : { description: effort.description }),
+              })),
+              ...(metadata.defaultEffort === undefined ? {} : { defaultEffort: String(metadata.defaultEffort) }),
+            }
+          }
+        } catch (error) {
+          if (signal.aborted) throw error
+          failures.push({
+            provider: provider.id,
+            model: model.id,
+            message: 'model reasoning metadata is unavailable',
+          })
+        }
+      }
+      catalogModels.push({
+        id: model.id,
+        name: model.name ?? model.id,
+        ...(model.description === undefined ? {} : { description: model.description }),
+        ...(model.inputModalities === undefined ? {} : { inputModalities: [...model.inputModalities] }),
+        ...(reasoning === undefined ? {} : { reasoning }),
+      })
+    }
+    providers.push({ id: provider.id, name: provider.name ?? provider.id, models: catalogModels })
+  }
+  return { providers, failures }
+}
+
+/**
+ * Bind the catalog builder to the lazily resolved LLM service.
+ * @param getLlm - resolves the Harness LLM service at call time.
+ * @returns a catalog reader that fails with `translation/route-unavailable`
+ *   when the service is not mounted.
+ */
+export function createTranslationCatalogReader(
+  getLlm: () => LlmServiceLike | undefined,
+): (signal: AbortSignal) => Promise<TranslationCatalog> {
+  return async (signal) => {
+    let llm: LlmServiceLike | undefined
+    try {
+      llm = getLlm()
+    } catch {
+      // The service may exist yet be unresolvable from this fiber; report it
+      // like an absent service instead of leaking a Cordis lookup error.
+      llm = undefined
+    }
+    if (llm === undefined) {
+      throw new TranslationRouteError('translation/route-unavailable', 'the Harness llm service is not mounted')
+    }
+    return await buildTranslationCatalog(llm, signal)
+  }
+}
+
 function invalidOutput(): TranslationRouteError {
   return new TranslationRouteError('translation/invalid-response', 'translation returned non-text output')
 }
@@ -327,6 +453,7 @@ function failure(code: string, message: string): TranslationRpcResult<never> {
 export function createTranslationHandler(
   route: LlmTranslationRoute,
   store: TranslationSettingsStore,
+  catalog?: (signal: AbortSignal) => Promise<TranslationCatalog>,
 ): (endpoint: string, payload: unknown, signal: AbortSignal) => Promise<TranslationRpcResult<unknown>> {
   return async (endpoint, payload, signal) => {
     try {
@@ -343,6 +470,12 @@ export function createTranslationHandler(
           if (error instanceof TranslationSettingsError) return failure('translation/bad-request', error.message)
           throw error
         }
+      }
+      if (endpoint === TRANSLATION_RPC.catalog) {
+        if (catalog === undefined) {
+          return failure('translation/route-unavailable', 'translation catalog is unavailable')
+        }
+        return { ok: true, value: await catalog(signal) }
       }
       if (endpoint === TRANSLATION_RPC.plan) {
         return { ok: true, value: await route.plan(signal) }

@@ -76,8 +76,9 @@ export type ThinkBoxLocaleKey =
   | 'save' | 'saving' | 'discard' | 'unsaved' | 'saveFailed'
   | 'translationTitle' | 'translationHint' | 'translationLoading' | 'translationUnavailable'
   | 'translationBackend' | 'translationBackendHint' | 'translationBackendBundle' | 'translationBackendLlm'
-  | 'translationProvider' | 'translationProviderHint' | 'translationModel' | 'translationModelHint'
-  | 'translationEffort' | 'translationEffortHint'
+  | 'translationRoute' | 'translationCatalogLoading' | 'translationCatalogFailed'
+  | 'translationRouteMissing' | 'translationBundleDecides' | 'translationSearchModels'
+  | 'translationModel' | 'translationEffort' | 'translationEffortDefault'
   | 'translationTargetLanguage' | 'translationTargetLanguageHint'
   | 'translationMaxTextChars' | 'translationMaxTextCharsHint'
   | 'translationAutoTranslate' | 'translationAutoTranslateHint' | 'translationSaveFailed'
@@ -107,12 +108,15 @@ export const en: Record<ThinkBoxLocaleKey, string> = {
   translationBackendHint: 'bundle uses the official reasoning-translation bundle (Google, Bing, DeepSeek official API). llm calls a model route directly, e.g. a free OpenAI-compatible provider.',
   translationBackendBundle: 'Official bundle (bundle)',
   translationBackendLlm: 'Direct model route (llm)',
-  translationProvider: 'Provider route (provider)',
-  translationProviderHint: 'Harness route id used by the llm backend, for example opencode-go.',
+  translationRoute: 'Model route',
+  translationCatalogLoading: 'Loading the model catalog…',
+  translationCatalogFailed: 'The model catalog could not be loaded.',
+  translationRouteMissing: 'The current route is not in the catalog.',
+  translationBundleDecides: 'The official bundle chooses the service.',
+  translationSearchModels: 'Search models',
   translationModel: 'Model',
-  translationModelHint: 'Exact model id, for example deepseek-v4.1-flash.',
   translationEffort: 'Reasoning effort',
-  translationEffortHint: 'Leave empty to use the route default. Unsupported levels fall back to low, then to the route default.',
+  translationEffortDefault: 'Route default',
   translationTargetLanguage: 'Target language',
   translationTargetLanguageHint: 'auto follows the UI language; a tag such as zh, en, or ja overrides it.',
   translationMaxTextChars: 'Fragment limit (characters)',
@@ -147,12 +151,15 @@ export const zh: Record<ThinkBoxLocaleKey, string> = {
   translationBackendHint: 'bundle 使用官方「思考过程翻译」组合包（Google、Bing、DeepSeek 官方 API）；llm 直连模型路由，例如免费的 OpenAI 兼容服务。',
   translationBackendBundle: '官方组合包（bundle）',
   translationBackendLlm: '直连模型路由（llm）',
-  translationProvider: '服务路由（provider）',
-  translationProviderHint: 'llm 后端使用的 Harness 路由 id，例如 opencode-go。',
+  translationRoute: '模型路由',
+  translationCatalogLoading: '正在加载模型目录…',
+  translationCatalogFailed: '模型目录加载失败。',
+  translationRouteMissing: '当前路由不在列表中',
+  translationBundleDecides: '官方组合包决定服务。',
+  translationSearchModels: '搜索模型',
   translationModel: '模型',
-  translationModelHint: '精确的模型 id，例如 deepseek-v4.1-flash。',
   translationEffort: '推理强度',
-  translationEffortHint: '留空使用路由默认值；不支持时回退到 low，再回退到路由默认。',
+  translationEffortDefault: '路由默认',
   translationTargetLanguage: '目标语言',
   translationTargetLanguageHint: 'auto 跟随界面语言；也可以填 zh、en、ja 等标签。',
   translationMaxTextChars: '分片上限（字符）',

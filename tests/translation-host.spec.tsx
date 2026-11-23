@@ -3,7 +3,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import {
+  buildTranslationCatalog,
   createLlmTranslationRoute,
+  createTranslationCatalogReader,
   createTranslationHandler,
   TranslationRouteError,
   type LlmServiceLike,
@@ -250,5 +252,113 @@ describe('createLlmTranslationRoute', () => {
     expect(failure).toBeInstanceOf(TranslationRouteError)
     expect((failure as TranslationRouteError).code).toBe('translation/request-failed')
     expect((failure as Error).message).not.toContain('secret')
+  })
+})
+
+describe('translation catalog', () => {
+  const signal = (): AbortSignal => new AbortController().signal
+
+  it('builds provider → model → reasoning and filters non-text models', async () => {
+    const llm: LlmServiceLike = {
+      listProviders: () => [{ id: 'alpha', name: 'Alpha' }, { id: 'beta', name: 'Beta' }],
+      listModels: async (provider) => (provider === 'alpha'
+        ? [
+          { id: 'text-model', name: 'Text model', inputModalities: ['text'] },
+          { id: 'image-model', name: 'Image model', inputModalities: ['image'] },
+          { id: 'no-meta' },
+        ]
+        : [{ id: 'beta-model', name: 'Beta model' }]),
+      resolveModelInfo: async (_provider: string, model: string) => {
+        if (model === 'no-meta') throw new Error('metadata unavailable')
+        return {
+          reasoning: {
+            efforts: [
+              { id: 'low', name: 'Low' },
+              { id: 'high', name: 'High', description: 'Slower' },
+            ],
+            defaultEffort: 'low',
+          },
+        }
+      },
+      prepareCall: async () => { throw new Error('not used') },
+    }
+    const catalog = await buildTranslationCatalog(llm, signal())
+    expect(catalog.providers[0]).toMatchObject({
+      id: 'alpha',
+      name: 'Alpha',
+      models: [
+        {
+          id: 'text-model',
+          name: 'Text model',
+          reasoning: {
+            efforts: [{ id: 'low', name: 'Low' }, { id: 'high', name: 'High', description: 'Slower' }],
+            defaultEffort: 'low',
+          },
+        },
+        { id: 'no-meta', name: 'no-meta' },
+      ],
+    })
+    expect(catalog.providers[0]?.models.map(model => model.id)).toEqual(['text-model', 'no-meta'])
+    expect(catalog.failures).toEqual([
+      { provider: 'alpha', model: 'no-meta', message: 'model reasoning metadata is unavailable' },
+    ])
+  })
+
+  it('records a failed provider catalogue and keeps the other providers', async () => {
+    const llm: LlmServiceLike = {
+      listProviders: () => [{ id: 'broken' }, { id: 'healthy', name: 'Healthy' }],
+      listModels: async (provider) => {
+        if (provider === 'broken') throw new Error('provider down')
+        return [{ id: 'm1', name: 'M1' }]
+      },
+      prepareCall: async () => { throw new Error('not used') },
+    }
+    const catalog = await buildTranslationCatalog(llm, signal())
+    expect(catalog.providers).toEqual([{ id: 'healthy', name: 'Healthy', models: [{ id: 'm1', name: 'M1' }] }])
+    expect(catalog.failures).toEqual([{ provider: 'broken', message: 'provider catalog is unavailable' }])
+  })
+
+  it('reports route-unavailable when the llm service is missing', async () => {
+    const reader = createTranslationCatalogReader(() => undefined)
+    await expect(reader(signal())).rejects.toMatchObject({ code: 'translation/route-unavailable' })
+    const handler = createTranslationHandler(
+      createLlmTranslationRoute(() => CONFIG, () => llmOf()),
+      memoryStore(),
+      createTranslationCatalogReader(() => undefined),
+    )
+    const result = await handler(TRANSLATION_RPC.catalog, {}, signal())
+    expect(result).toMatchObject({ ok: false, error: { code: 'translation/route-unavailable' } })
+  })
+
+  it('serves the catalog through the channel endpoint', async () => {
+    const llm: LlmServiceLike = {
+      listProviders: () => [{ id: 'opencode-go' }],
+      listModels: async () => [{ id: 'deepseek-v4.1-flash', name: 'DeepSeek Flash' }],
+      resolveModelInfo: async () => ({
+        reasoning: { efforts: [{ id: 'low', name: 'Low' }], defaultEffort: 'low' },
+      }),
+      prepareCall: async () => { throw new Error('not used') },
+    }
+    const handler = createTranslationHandler(
+      createLlmTranslationRoute(() => CONFIG, () => llm),
+      memoryStore(),
+      createTranslationCatalogReader(() => llm),
+    )
+    const result = await handler(TRANSLATION_RPC.catalog, {}, signal())
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        providers: [{
+          id: 'opencode-go',
+          name: 'opencode-go',
+          models: [{
+            id: 'deepseek-v4.1-flash',
+            name: 'DeepSeek Flash',
+            reasoning: { efforts: [{ id: 'low', name: 'Low' }], defaultEffort: 'low' },
+          }],
+        }],
+        failures: [],
+      },
+    })
   })
 })

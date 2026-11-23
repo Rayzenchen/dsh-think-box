@@ -9,6 +9,8 @@ import type { InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import { IconChevronDown } from './harnessIcons.ts'
 import type { ThinkBoxCardFace, TranslationCardState } from './think-box-card-controller.ts'
 import type { TranslationConfig } from '../config.ts'
+import type { TranslationCatalog } from '../translation-protocol.ts'
+import { TranslationModelPicker } from './TranslationModelPicker.tsx'
 import type { ThinkBoxLocaleKey } from './locales.ts'
 import css from './ThinkBoxCard.module.css'
 
@@ -111,6 +113,7 @@ export function ThinkBoxCard(props: ThinkBoxCardProps) {
               save={props.saveTranslation}
               discard={props.discardTranslation}
               reload={props.reloadTranslation}
+              loadCatalog={props.loadTranslationCatalog}
             />
           </div>
         )
@@ -131,6 +134,7 @@ function TranslationChannel(props: {
   save: () => void
   discard: () => void
   reload: () => void
+  loadCatalog: (signal?: AbortSignal) => Promise<TranslationCatalog>
 }) {
   const { t, translation } = props
   const settings = translation.settings
@@ -166,46 +170,18 @@ function TranslationChannel(props: {
             </span>
             <span className={css.hint}>{t('translationBackendHint')}</span>
           </label>
-          <label className={css.field}>
-            <span className={css.fieldHead}>
-              <span className={css.label}>{t('translationProvider')}</span>
-              <input
-                className={css.textInput}
-                type="text"
-                value={settings.provider}
-                disabled={disabled}
-                onChange={(event) => { props.edit({ provider: event.target.value }) }}
-              />
-            </span>
-            <span className={css.hint}>{t('translationProviderHint')}</span>
-          </label>
-          <label className={css.field}>
-            <span className={css.fieldHead}>
-              <span className={css.label}>{t('translationModel')}</span>
-              <input
-                className={css.textInput}
-                type="text"
-                value={settings.model}
-                disabled={disabled}
-                onChange={(event) => { props.edit({ model: event.target.value }) }}
-              />
-            </span>
-            <span className={css.hint}>{t('translationModelHint')}</span>
-          </label>
-          <label className={css.field}>
-            <span className={css.fieldHead}>
-              <span className={css.label}>{t('translationEffort')}</span>
-              <input
-                className={css.textInput}
-                type="text"
-                value={settings.reasoningEffort}
-                placeholder="low"
-                disabled={disabled}
-                onChange={(event) => { props.edit({ reasoningEffort: event.target.value }) }}
-              />
-            </span>
-            <span className={css.hint}>{t('translationEffortHint')}</span>
-          </label>
+          <div className={css.field}>
+            <TranslationModelPicker
+              t={t}
+              provider={settings.provider}
+              model={settings.model}
+              reasoningEffort={settings.reasoningEffort}
+              backend={settings.backend}
+              disabled={disabled}
+              loadCatalog={props.loadCatalog}
+              onSelect={(patch) => { props.edit(patch) }}
+            />
+          </div>
           <label className={css.field}>
             <span className={css.fieldHead}>
               <span className={css.label}>{t('translationTargetLanguage')}</span>

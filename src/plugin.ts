@@ -7,7 +7,12 @@ import {
   type ThinkBoxConfig,
   type Volatile,
 } from './config.ts'
-import { createLlmTranslationRoute, createTranslationHandler, type LlmServiceLike } from './translation-host.ts'
+import {
+  createLlmTranslationRoute,
+  createTranslationCatalogReader,
+  createTranslationHandler,
+  type LlmServiceLike,
+} from './translation-host.ts'
 import { TRANSLATION_RPC_CHANNEL } from './translation-protocol.ts'
 import { createTranslationSettingsStore } from './translation-settings.ts'
 import { injectThinkBoxConfig } from './boot-config.ts'
@@ -271,10 +276,13 @@ export function apply(ctx: Context, config: Config): void {
       () => translationStore.snapshot(),
       () => translateCtx.get('llm') as unknown as LlmServiceLike | undefined,
     )
+    const catalog = createTranslationCatalogReader(
+      () => translateCtx.get('llm') as unknown as LlmServiceLike | undefined,
+    )
     registerSettingsChannel(
       translateCtx,
       TRANSLATION_RPC_CHANNEL,
-      createTranslationHandler(route, translationStore) as unknown as ConnectionRpcHandler,
+      createTranslationHandler(route, translationStore, catalog) as unknown as ConnectionRpcHandler,
     )
   })
   // The preferences are no longer a settings namespace, so the auto-generated

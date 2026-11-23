@@ -4,6 +4,7 @@ import { createSnapshotStore, type SnapshotStore } from './clientStore.ts'
 import { DEFAULT_TRANSLATION_CONFIG, type TranslationConfig } from '../config.ts'
 import { DEFAULT_THINK_BOX_SETTINGS, type ThinkBoxSettings } from '../settings.ts'
 import type { ThinkBoxSettingsView } from '../settings-api.ts'
+import type { TranslationCatalog } from '../translation-protocol.ts'
 import type { ThinkBoxSettingsApi } from './think-box-settings-api.ts'
 
 /** What the settings card renders. It stays visible while its Host RPC loads. */
@@ -22,6 +23,8 @@ export interface TranslationCardBridge {
   readonly initial: TranslationConfig
   read(signal?: AbortSignal): Promise<TranslationConfig>
   write(patch: Partial<TranslationConfig>): Promise<TranslationConfig>
+  /** Provider → model → reasoning directory for the picker. */
+  catalog(signal?: AbortSignal): Promise<TranslationCatalog>
   /** Push freshly saved settings into the running chat renderer. */
   apply(settings: TranslationConfig): void
 }
@@ -49,6 +52,8 @@ export interface ThinkBoxCardFace {
   saveTranslation: () => void
   discardTranslation: () => void
   reloadTranslation: () => void
+  /** Read the translation catalog on demand (never blocks other saves). */
+  loadTranslationCatalog: (signal?: AbortSignal) => Promise<TranslationCatalog>
 }
 
 /** Bridges the plugin's protected Host interface onto a staged settings form. */
@@ -136,6 +141,12 @@ export class ThinkBoxCardController {
         this.publishTranslation()
       },
       reloadTranslation: () => { void this.loadTranslation() },
+      loadTranslationCatalog: async (signal) => {
+        if (this.translation === undefined) {
+          throw new Error('translation settings are unavailable')
+        }
+        return await this.translation.catalog(signal)
+      },
     }
   }
 

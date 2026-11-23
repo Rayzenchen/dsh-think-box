@@ -367,6 +367,7 @@ export function apply(ctx: ClientContext): void {
         translation.apply(next)
         return next
       },
+      catalog: async (signal) => await (await waitTranslationApi()).catalog(signal),
       apply: (settings) => { translation.apply(settings) },
     }
     const card = new ThinkBoxCardController(

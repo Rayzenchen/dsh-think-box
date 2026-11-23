@@ -15,13 +15,36 @@ import {
   THINK_BOX_SETTINGS_RPC_CHANNEL,
   type ThinkBoxSettingsView,
 } from '../src/settings-api.ts'
-import { TRANSLATION_RPC, TRANSLATION_RPC_CHANNEL } from '../src/translation-protocol.ts'
+import {
+  TRANSLATION_RPC,
+  TRANSLATION_RPC_CHANNEL,
+  type TranslationCatalog,
+} from '../src/translation-protocol.ts'
 import { DEFAULT_TRANSLATION_CONFIG, type TranslationConfig } from '../src/config.ts'
 
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
 })
+
+const catalogFixture: TranslationCatalog = {
+  providers: [{
+    id: 'alpha',
+    name: 'Alpha Provider',
+    models: [
+      {
+        id: 'm1',
+        name: 'Model One',
+        reasoning: {
+          efforts: [{ id: 'low', name: 'Low' }, { id: 'high', name: 'High' }],
+          defaultEffort: 'high',
+        },
+      },
+      { id: 'm2', name: 'Model Two' },
+    ],
+  }],
+  failures: [],
+}
 
 const readyView: ThinkBoxSettingsView = {
   writable: true,
@@ -63,6 +86,9 @@ async function bench(options: BenchOptions = {}): Promise<{
   let view = options.view ?? readyView
   let translation: TranslationConfig = {
     ...DEFAULT_TRANSLATION_CONFIG,
+    provider: 'alpha',
+    model: 'm1',
+    reasoningEffort: 'low',
     autoTranslate: false,
     ...options.translation,
   }
@@ -88,6 +114,9 @@ async function bench(options: BenchOptions = {}): Promise<{
       return { ok: false as const, error: { code: 'internal', message: 'unknown endpoint' } }
     }
     if (channel === TRANSLATION_RPC_CHANNEL) {
+      if (endpoint === TRANSLATION_RPC.catalog) {
+        return { ok: true as const, value: catalogFixture }
+      }
       if (endpoint === TRANSLATION_RPC.settingsRead) {
         if (options.failTranslationRead === true) throw new Error('translation RPC unavailable')
         return { ok: true as const, value: translation }
@@ -229,6 +258,48 @@ describe('reasoning settings card', () => {
     await waitFor(() => expect(face.hooks.thinkBoxCard.getSnapshot().failed).toBe(true))
     expect(face.hooks.thinkBoxCard.getSnapshot().enabled).toBe(false)
     expect(screen.getByText(en.saveFailed)).toBeTruthy()
+  })
+
+  it('replaces the three route inputs with the catalog picker', async () => {
+    const { screen } = await renderCard({
+      translation: { backend: 'llm', provider: 'alpha', model: 'm1', reasoningEffort: 'low' },
+    })
+    // The old free-text route fields are gone.
+    expect(screen.queryByText('Provider route (provider)')).toBeNull()
+    expect(screen.queryByText('Exact model id, for example deepseek-v4.1-flash.')).toBeNull()
+    expect(screen.queryByText(/Leave empty to use the route default/)).toBeNull()
+    await waitFor(() => expect(screen.getByRole('button', { name: new RegExp(en.translationRoute) })).toBeTruthy(), { timeout: 1000 })
+    await waitFor(() => expect(
+      screen.getByRole('button', { name: new RegExp(en.translationRoute) }).textContent,
+    ).toContain('Alpha Provider · Model One · Low'))
+  })
+
+  it('shows the bundle notice instead of the picker for the official backend', async () => {
+    const { screen } = await renderCard({ translation: { backend: 'bundle' } })
+    expect(screen.getByText(en.translationBundleDecides)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: new RegExp(en.translationRoute) })).toBeNull()
+  })
+
+  it('saves a route picked from the catalog through the channel Save', async () => {
+    const { face, screen, bench } = await renderCard({
+      translation: { backend: 'llm', provider: 'alpha', model: 'm1', reasoningEffort: 'low' },
+    })
+    await waitFor(() => expect(
+      screen.getByRole('button', { name: new RegExp(en.translationRoute) }).textContent,
+    ).toContain('Alpha Provider'))
+    const trigger = screen.getByRole('button', { name: new RegExp(en.translationRoute) })
+    fireEvent.click(trigger)
+    fireEvent.click(screen.getByText(en.translationModel))
+    fireEvent.click(screen.getByText('Model Two'))
+    const saves = screen.getAllByRole('button', { name: en.save })
+    fireEvent.click(saves[saves.length - 1] as HTMLElement)
+    await waitFor(() => expect(bench.call).toHaveBeenCalledWith(
+      TRANSLATION_RPC_CHANNEL,
+      TRANSLATION_RPC.settingsWrite,
+      expect.objectContaining({ provider: 'alpha', model: 'm2', reasoningEffort: '' }),
+      undefined,
+    ))
+    await waitFor(() => expect(face.hooks.translationCard.getSnapshot().dirty).toBe(false))
   })
 
   it('edits and saves the translation channel', async () => {

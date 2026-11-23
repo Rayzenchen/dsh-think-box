@@ -3415,7 +3415,9 @@ describe('plugin Config schema', () => {
       maxScrollSpeedPxPerSec: 400,
       translation: DEFAULT_STREAM_CONFIG.translation,
     })
-    expect(resolved).toEqual({
+    // 0.2.x moved the user preferences into the same config entry, so the
+    // resolved object also carries their defaults; the overrides still win.
+    expect(resolved).toMatchObject({
       mode: 'teleprompter',
       preset: 'realtime',
       revealCharsPerSec: 60,

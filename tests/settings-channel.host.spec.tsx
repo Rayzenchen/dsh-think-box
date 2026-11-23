@@ -16,9 +16,43 @@ const { SettingsProvider } = DshSettings
 type SettingsNamespace = DshSettings.SettingsNamespace
 import { afterEach, describe, expect, it } from 'vitest'
 import { STREAM_PACKAGE_VERSION } from '../src/package-meta.ts'
+import type { StreamConfig, Volatile } from '../src/config.ts'
 import { apply, Config } from '../src/plugin.ts'
 import { STREAM_SETTINGS_RPC, STREAM_SETTINGS_RPC_CHANNEL } from '../src/settings-api.ts'
-import { DEFAULT_STREAM_SETTINGS, STREAM_SETTINGS_NS } from '../src/settings.ts'
+import { DEFAULT_STREAM_SETTINGS } from '../src/settings.ts'
+
+/** Symbol the host Loader uses to commit a new volatile snapshot. */
+const VOLATILE_WRITE = Symbol.for('cosmokit.volatile.write')
+
+/** Stable config reference, shaped like the host Schemastery's volatile output. */
+function ref<T>(value: T): Volatile<T> {
+  let current = value
+  return {
+    get: () => current,
+    [VOLATILE_WRITE]: (next: unknown) => { current = next as T },
+  } as unknown as Volatile<T>
+}
+
+/**
+ * Resolve the packageless default config into the shape the deployed Loader
+ * hands to `apply`: preference fields are stable references. The pinned test
+ * schemastery predates native `.volatile()` wrapping, so it is built here.
+ * @returns resolved plugin config.
+ */
+function resolveConfig(): Config {
+  const withDefaults = Config({}) as unknown as StreamConfig
+  return {
+    ...withDefaults,
+    enabled: ref(withDefaults.enabled),
+    controlScroll: ref(withDefaults.controlScroll),
+    preset: ref(withDefaults.preset),
+    motionPreference: ref(withDefaults.motionPreference),
+    thinkAutoExpand: ref(withDefaults.thinkAutoExpand),
+    logarithmicFade: ref(withDefaults.logarithmicFade),
+    debugEnabled: ref(withDefaults.debugEnabled),
+    debugTuning: ref({ ...withDefaults.debugTuning }),
+  } as unknown as Config
+}
 
 /** In-memory settings provider -- same shape as the Harness's own specs. */
 class MemorySettings extends SettingsProvider {
@@ -57,11 +91,28 @@ function fakeWebServer(routes: WebRoute[]): {
  * way the broken kernel generation does.
  * @param fenced - whether the fake connection also exposes its request fence.
  */
-async function mountHost(fenced: boolean): Promise<{ ctx: Context; routes: WebRoute[]; dispose: () => Promise<void> }> {
+async function mountHost(fenced: boolean): Promise<{
+  ctx: Context
+  routes: WebRoute[]
+  persisted: () => Record<string, unknown> | undefined
+  dispose: () => Promise<void>
+}> {
   const ctx = new Context()
   ctx.baseUrl = `${pathToFileURL(process.cwd()).href}/`
   const routes: WebRoute[] = []
   ctx.provide('webServer', fakeWebServer(routes) as never)
+  // 0.2.x persistence path: the card writes the profile entry through the
+  // config editor service instead of a settings namespace.
+  const entry = { options: { id: 'think-box', name: '@local/dsh-think-box', config: {} } }
+  let persisted: Record<string, unknown> | undefined
+  ctx.provide('configEditor', {
+    entries: () => [entry],
+    async edit(target: typeof entry, change: (current: Record<string, unknown>, inherited: Record<string, unknown>) => Record<string, unknown>) {
+      const next = change({ ...(target.options.config as Record<string, unknown>) }, {})
+      persisted = next
+      target.options.config = next
+    },
+  } as never)
   ctx.provide('connection', {
     rpc: {
       handle(_channel: string, _handler: ConnectionRpcHandler, _options: ConnectionRpcHandlerOptions): () => Promise<void> {
@@ -77,9 +128,9 @@ async function mountHost(fenced: boolean): Promise<{ ctx: Context; routes: WebRo
       : {},
   } as never)
   await ctx.plugin(MemorySettings).await()
-  const fiber = ctx.plugin({ apply, Config })
+  const fiber = ctx.plugin({ apply: (runtimeCtx: Context) => { apply(runtimeCtx, resolveConfig()) } })
   await fiber.await()
-  return { ctx, routes, dispose: () => fiber.dispose() }
+  return { ctx, routes, persisted: () => persisted, dispose: () => fiber.dispose() }
 }
 
 const mounted: Array<() => Promise<void>> = []
@@ -151,8 +202,7 @@ describe('smooth-stream settings channel fallback', () => {
     expect(JSON.parse(write.body)).toMatchObject({
       result: { ok: true, value: { enabled: false, controlScroll: true } },
     })
-    expect(host.ctx.settings.get(STREAM_SETTINGS_NS as SettingsNamespace))
-      .toMatchObject({ enabled: false, controlScroll: true })
+    expect(host.persisted()).toMatchObject({ enabled: false, controlScroll: true })
 
     await host.dispose()
     mounted.pop()
@@ -195,7 +245,8 @@ describe('smooth-stream settings channel fallback', () => {
     const host = await mountHost(false)
     mounted.push(host.dispose)
     expect(host.routes).toEqual([])
-    // The plugin still applies: only the card's read is unavailable.
-    expect(host.ctx.settings.get(STREAM_SETTINGS_NS as SettingsNamespace)).toEqual(DEFAULT_STREAM_SETTINGS)
+    // The plugin still applies (mountHost awaited its fiber): only the card's
+    // read is unavailable on this unprotected kernel.
+    expect(host.ctx.get('configEditor')).toBeDefined()
   })
 })

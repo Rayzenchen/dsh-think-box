@@ -1,11 +1,14 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { ConnectionRpcHandler } from '@deepseek-ai/dsh-client-connection'
-// Type-only: erased at runtime, so the host entry never link-fails on kernels
-// whose dsh-settings no longer ships the value-side helper (issue #17).
-import type { SettingsNamespace } from '@deepseek-ai/dsh-settings'
 import Schema from '@deepseek-ai/schemastery'
-import { DEFAULT_STREAM_CONFIG, DEFAULT_TRANSLATION_CONFIG, type StreamConfig } from './config.ts'
+import {
+  DEFAULT_STREAM_CONFIG,
+  DEFAULT_TRANSLATION_CONFIG,
+  type StreamConfig,
+  type StreamMode,
+  type Volatile,
+} from './config.ts'
 import { createLlmTranslationRoute, createTranslationHandler, type LlmServiceLike } from './translation-host.ts'
 import { TRANSLATION_RPC_CHANNEL } from './translation-protocol.ts'
 import { createTranslationSettingsStore } from './translation-settings.ts'
@@ -23,22 +26,106 @@ import {
   DEFAULT_STREAM_SETTINGS,
   STREAM_SETTINGS_NS,
   type StreamDebugTuning,
+  type StreamMotionPreference,
   type StreamSettings,
+  type StreamSmoothingPreset,
 } from './settings.ts'
 
 /** Display name shown by the Host loader while the plugin is mounted. */
 export const name = '@local/dsh-think-box'
 
 /**
- * Plugin configuration accepted from the overlay's `config` section. Cordis
- * validates the value against this schema at load and fills omitted fields
- * from the shared defaults, so an invalid value fails the load loudly.
+ * Profile entry id this package is inserted under by `cordis.patch.yml`. The
+ * fallback entry lookup (see {@link resolveConfigTarget}) matches this id.
  */
-export interface Config extends StreamConfig {}
+const CONFIG_ENTRY_ID = 'think-box'
 
-export const Config: Schema<Config> = Schema.object({
+/**
+ * Plugin configuration: the composition-time engine settings plus the
+ * user-editable preferences the Plugins page now persists in the same profile
+ * entry (0.2.x replacement for the removed `settings.register` namespace).
+ *
+ * The volatile fields are references at runtime, so every read goes through
+ * `.get()`; the plain fields are ordinary composition values.
+ */
+export interface Config {
+  /** Compatibility field; both values use the current adaptive reveal engine. */
+  readonly mode: StreamMode
+  /** Smoothing preset for the reveal cadence (live user preference). */
+  readonly preset: Volatile<StreamSmoothingPreset>
+  /** Unused at runtime; kept so existing overlays load. */
+  readonly revealCharsPerSec: number
+  /** Unused at runtime; kept so existing overlays load. */
+  readonly scrollSpeedPxPerSec: number
+  /** Unused at runtime; retained so existing overlays continue to load. */
+  readonly maxScrollSpeedPxPerSec: number
+  /** Reasoning-translation backend and request limits (composition seed). */
+  readonly translation: {
+    readonly backend: 'bundle' | 'llm'
+    readonly provider: string
+    readonly model: string
+    readonly reasoningEffort: string
+    readonly targetLanguage: string
+    readonly maxTextChars: number
+    readonly maxTokens: number
+    readonly timeoutMs: number
+    readonly autoTranslate: boolean
+  }
+  /** Whether this plugin owns conversation rendering. */
+  readonly enabled: Volatile<boolean>
+  /** Whether this plugin also owns conversation bottom-follow. */
+  readonly controlScroll: Volatile<boolean>
+  /** How the reveal honors the OS reduced-motion preference. */
+  readonly motionPreference: Volatile<StreamMotionPreference>
+  /** Whether a reasoning block follows while it is the streaming tail. */
+  readonly thinkAutoExpand: Volatile<boolean>
+  /** Logarithmic text fade for the answer and expanded thinking body. */
+  readonly logarithmicFade: Volatile<boolean>
+  /** Whether the live renderer diagnostics panel is enabled. */
+  readonly debugEnabled: Volatile<boolean>
+  /** Values edited by the diagnostics panel. */
+  readonly debugTuning: Volatile<StreamDebugTuning>
+}
+
+/** Symbol the Loader uses to commit a new volatile snapshot into a reference. */
+const VOLATILE_WRITE = Symbol.for('cosmokit.volatile.write')
+
+/** Commit a new snapshot into one config reference (the Loader's own protocol). */
+function writeConfigRef<T>(ref: Volatile<T>, value: T): void {
+  const writable = ref as unknown as { [key: symbol]: ((value: unknown) => void) | undefined }
+  writable[VOLATILE_WRITE]?.(value)
+}
+
+/**
+ * Mark one schema field volatile exactly like Schemastery's `.volatile()` does
+ * (`extra('volatile', true)`). Local helper because the pinned dev dependency
+ * (schemastery 3.18) does not ship the builder method yet, while the deployed
+ * host does.
+ * @param schema - leaf schema to mark.
+ * @returns the marked schema.
+ */
+function volatileField<T>(schema: Schema<T>): Schema<T> {
+  const candidate = schema as unknown as { extra?: (key: string, value: unknown) => Schema<T> }
+  return typeof candidate.extra === 'function' ? candidate.extra('volatile', true) : schema
+}
+
+/**
+ * Raw plugin configuration accepted from the profile patch: the same shape
+ * with plain values (the schema output turns the preference fields into
+ * references).
+ */
+export type ConfigInput = Partial<StreamConfig>
+
+/**
+ * Plugin configuration schema. Ordinary fields keep Cordis' load-time
+ * validation; the preference fields are volatile, so profile-patch edits reach
+ * the running plugin without re-activating it.
+ */
+export const Config = Schema.object({
   mode: Schema.union(['typewriter', 'teleprompter'] as const).default(DEFAULT_STREAM_CONFIG.mode),
-  preset: Schema.union(['realtime', 'balanced', 'silky'] as const).default(DEFAULT_STREAM_CONFIG.preset),
+  preset: volatileField(
+    Schema.union(['realtime', 'balanced', 'silky'] as const).default(DEFAULT_STREAM_SETTINGS.preset),
+  ),
   revealCharsPerSec: Schema.number()
     .min(5)
     .max(200)
@@ -62,29 +149,17 @@ export const Config: Schema<Config> = Schema.object({
     timeoutMs: Schema.number().min(1_000).max(600_000).default(DEFAULT_TRANSLATION_CONFIG.timeoutMs),
     autoTranslate: Schema.boolean().default(DEFAULT_TRANSLATION_CONFIG.autoTranslate),
   }).default(DEFAULT_TRANSLATION_CONFIG),
-})
-
-/**
- * Schema of the user-owned settings section. The Host keeps it in the durable
- * settings provider while the browser edits it through the plugin RPC below.
- */
-export const StreamSettingsSchema: Schema<StreamSettings> = Schema.object({
-  enabled: Schema.boolean().default(DEFAULT_STREAM_SETTINGS.enabled),
-  controlScroll: Schema.boolean().default(DEFAULT_STREAM_SETTINGS.controlScroll),
-  preset: Schema.union([
-    Schema.const('realtime'),
-    Schema.const('balanced'),
-    Schema.const('silky'),
-  ] as const).default(DEFAULT_STREAM_SETTINGS.preset),
-  motionPreference: Schema.union([
+  enabled: volatileField(Schema.boolean().default(DEFAULT_STREAM_SETTINGS.enabled)),
+  controlScroll: volatileField(Schema.boolean().default(DEFAULT_STREAM_SETTINGS.controlScroll)),
+  motionPreference: volatileField(Schema.union([
     Schema.const('auto'),
     Schema.const('force-smooth'),
     Schema.const('force-reduced'),
-  ] as const).default(DEFAULT_STREAM_SETTINGS.motionPreference),
-  thinkAutoExpand: Schema.boolean().default(DEFAULT_STREAM_SETTINGS.thinkAutoExpand),
-  logarithmicFade: Schema.boolean().default(DEFAULT_STREAM_SETTINGS.logarithmicFade),
-  debugEnabled: Schema.boolean().default(DEFAULT_STREAM_SETTINGS.debugEnabled),
-  debugTuning: Schema.object({
+  ] as const).default(DEFAULT_STREAM_SETTINGS.motionPreference)),
+  thinkAutoExpand: volatileField(Schema.boolean().default(DEFAULT_STREAM_SETTINGS.thinkAutoExpand)),
+  logarithmicFade: volatileField(Schema.boolean().default(DEFAULT_STREAM_SETTINGS.logarithmicFade)),
+  debugEnabled: volatileField(Schema.boolean().default(DEFAULT_STREAM_SETTINGS.debugEnabled)),
+  debugTuning: volatileField(Schema.object({
     revealScale: Schema.number().min(0.25).max(2).default(DEFAULT_STREAM_SETTINGS.debugTuning.revealScale),
     queuePressure: Schema.number().min(0).max(2).default(DEFAULT_STREAM_SETTINGS.debugTuning.queuePressure),
     maxRevealCps: Schema.number().min(120).max(1000).default(DEFAULT_STREAM_SETTINGS.debugTuning.maxRevealCps),
@@ -94,20 +169,208 @@ export const StreamSettingsSchema: Schema<StreamSettings> = Schema.object({
     runwayPx: Schema.number().min(0).max(120).default(DEFAULT_STREAM_SETTINGS.debugTuning.runwayPx),
     reserveResponseMs: Schema.number().min(60).max(600).default(DEFAULT_STREAM_SETTINGS.debugTuning.reserveResponseMs),
     backpressureMinScale: Schema.number().min(0.25).max(1).default(DEFAULT_STREAM_SETTINGS.debugTuning.backpressureMinScale),
-  }),
-})
+  })),
+}) as unknown as Schema<ConfigInput, Config>
+
+/** One registered plugin entry as the config editor exposes it. */
+interface ConfigEntryLike {
+  readonly options: { readonly id?: string; readonly config?: unknown }
+}
+
+/** Structural subset of the 0.2.x `configEditor` service this plugin uses. */
+interface ConfigEditorLike {
+  entries(): ConfigEntryLike[]
+  edit(
+    entry: ConfigEntryLike,
+    change: (current: Record<string, unknown>, inherited: Record<string, unknown>) => Record<string, unknown>,
+  ): Promise<void>
+}
+
+/** The profile row this plugin owns, plus the editor that persists it. */
+interface ConfigTarget {
+  readonly editor: ConfigEditorLike
+  readonly entry: ConfigEntryLike
+}
 
 /**
- * Host half: log the resolved configuration and bridge it to the browser
- * half. The web boot graph carries no per-entry config, so the validated
- * value is injected into every served index response as a boot global the
- * client entry reads at apply time.
+ * Locate the profile entry this plugin may edit. The Loader stamps the owning
+ * entry onto the plugin fiber; when that stamp is unavailable (test contexts,
+ * unusual compositions) fall back to the config editor's own entry list. A
+ * target-less deployment is readable but not writable — never a load failure.
+ * @param ctx - plugin context.
+ * @returns editor plus entry, or `undefined` when this kernel cannot persist.
+ */
+function resolveConfigTarget(ctx: Context): ConfigTarget | undefined {
+  let editor: ConfigEditorLike | undefined
+  try {
+    editor = ctx.get('configEditor') as unknown as ConfigEditorLike | undefined
+  } catch {
+    editor = undefined
+  }
+  if (editor === undefined || typeof editor.edit !== 'function' || typeof editor.entries !== 'function') return undefined
+  const fiberEntry = (ctx.fiber as unknown as { entry?: ConfigEntryLike }).entry
+  if (fiberEntry !== undefined) return { editor, entry: fiberEntry }
+  try {
+    const entry = editor.entries().find(candidate => candidate.options.id === CONFIG_ENTRY_ID)
+    return entry === undefined ? undefined : { editor, entry }
+  } catch {
+    return undefined
+  }
+}
+
+/** Read the live preference snapshot from the volatile references. */
+function readSettings(config: Config): StreamSettings {
+  return {
+    enabled: config.enabled.get(),
+    controlScroll: config.controlScroll.get(),
+    preset: config.preset.get(),
+    motionPreference: config.motionPreference.get(),
+    thinkAutoExpand: config.thinkAutoExpand.get(),
+    logarithmicFade: config.logarithmicFade.get(),
+    debugEnabled: config.debugEnabled.get(),
+    debugTuning: { ...config.debugTuning.get() },
+  }
+}
+
+/**
+ * Complete JSON-safe boot snapshot for one page load: every volatile reference
+ * is read here, so the inline script never receives (or stringifies) a
+ * reference. The card's RPC then picks up the live values.
+ * @param config - resolved plugin configuration.
+ * @returns plain config object for the browser half.
+ */
+function bootSnapshot(config: Config): StreamConfig {
+  return {
+    ...readSettings(config),
+    mode: config.mode,
+    revealCharsPerSec: config.revealCharsPerSec,
+    scrollSpeedPxPerSec: config.scrollSpeedPxPerSec,
+    maxScrollSpeedPxPerSec: config.maxScrollSpeedPxPerSec,
+    translation: { ...config.translation },
+  }
+}
+
+/** Validation verdict for one settings write. */
+type PatchResult =
+  | { readonly ok: true; readonly settings: StreamSettings }
+  | { readonly ok: false; readonly message: string }
+
+/**
+ * Validate a partial settings patch and merge it over the live snapshot.
+ * @param current - live preference snapshot.
+ * @param payload - raw RPC payload.
+ * @param extras - whether the payload may carry the diagnostics pair.
+ * @returns the complete settings object to persist, or the rejection message.
+ */
+function mergeSettingsPatch(current: StreamSettings, payload: unknown, extras: boolean): PatchResult {
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
+    return { ok: false, message: 'settings payload must be an object' }
+  }
+  const next = payload as Partial<Record<keyof StreamSettings, unknown>>
+  if (typeof next.enabled !== 'boolean' || typeof next.controlScroll !== 'boolean' || typeof next.thinkAutoExpand !== 'boolean') {
+    return { ok: false, message: 'enabled, controlScroll and thinkAutoExpand must be booleans' }
+  }
+  if (next.preset !== undefined && next.preset !== 'realtime' && next.preset !== 'balanced' && next.preset !== 'silky') {
+    return { ok: false, message: 'preset must be one of realtime | balanced | silky' }
+  }
+  if (next.motionPreference !== undefined
+    && next.motionPreference !== 'auto'
+    && next.motionPreference !== 'force-smooth'
+    && next.motionPreference !== 'force-reduced') {
+    return { ok: false, message: 'motionPreference must be one of auto | force-smooth | force-reduced' }
+  }
+  if (next.logarithmicFade !== undefined && typeof next.logarithmicFade !== 'boolean') {
+    return { ok: false, message: 'logarithmicFade must be a boolean' }
+  }
+  const hasDebug = next.debugEnabled !== undefined || next.debugTuning !== undefined
+  if (hasDebug) {
+    if (!extras) return { ok: false, message: 'debug settings are not accepted on this endpoint' }
+    if (typeof next.debugEnabled !== 'boolean' || !validDebugTuning(next.debugTuning)) {
+      return { ok: false, message: 'debugEnabled and debugTuning must be provided together and be valid' }
+    }
+  }
+  const merged: StreamSettings = {
+    ...current,
+    enabled: next.enabled,
+    controlScroll: next.controlScroll,
+    thinkAutoExpand: next.thinkAutoExpand,
+    ...(next.preset === undefined ? {} : { preset: next.preset }),
+    ...(next.motionPreference === undefined ? {} : { motionPreference: next.motionPreference }),
+    ...(next.logarithmicFade === undefined ? {} : { logarithmicFade: next.logarithmicFade }),
+    ...(hasDebug
+      ? { debugEnabled: next.debugEnabled as boolean, debugTuning: next.debugTuning as StreamDebugTuning }
+      : {}),
+  }
+  return { ok: true, settings: merged }
+}
+
+/** Whether a diagnostics tuning object matches the published bounds. */
+function validDebugTuning(value: unknown): value is StreamDebugTuning {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const tuning = value as Record<string, unknown>
+  return typeof tuning.revealScale === 'number'
+    && tuning.revealScale >= 0.25 && tuning.revealScale <= 2
+    && typeof tuning.queuePressure === 'number'
+    && tuning.queuePressure >= 0 && tuning.queuePressure <= 2
+    && typeof tuning.maxRevealCps === 'number'
+    && tuning.maxRevealCps >= 120 && tuning.maxRevealCps <= 1000
+    && typeof tuning.springStiffness === 'number'
+    && tuning.springStiffness >= 40 && tuning.springStiffness <= 320
+    && typeof tuning.springDamping === 'number'
+    && tuning.springDamping >= 8 && tuning.springDamping <= 80
+    && typeof tuning.springMass === 'number'
+    && tuning.springMass >= 0.5 && tuning.springMass <= 3
+    && typeof tuning.runwayPx === 'number'
+    && tuning.runwayPx >= 0 && tuning.runwayPx <= 120
+    && typeof tuning.reserveResponseMs === 'number'
+    && tuning.reserveResponseMs >= 60 && tuning.reserveResponseMs <= 600
+    && typeof tuning.backpressureMinScale === 'number'
+    && tuning.backpressureMinScale >= 0.25 && tuning.backpressureMinScale <= 1
+}
+
+/** Commit every preference field into its volatile reference. */
+function writeSettingsRefs(config: Config, settings: StreamSettings): void {
+  writeConfigRef(config.enabled, settings.enabled)
+  writeConfigRef(config.controlScroll, settings.controlScroll)
+  writeConfigRef(config.preset, settings.preset)
+  writeConfigRef(config.motionPreference, settings.motionPreference)
+  writeConfigRef(config.thinkAutoExpand, settings.thinkAutoExpand)
+  writeConfigRef(config.logarithmicFade, settings.logarithmicFade)
+  writeConfigRef(config.debugEnabled, settings.debugEnabled)
+  writeConfigRef(config.debugTuning, { ...settings.debugTuning })
+}
+
+/**
+ * Persist one complete preference snapshot into the owning profile entry.
+ *
+ * `configEditor.edit()` replaces the entry's whole config, so the callback
+ * merges the inherited bundle layer and the current profile row before adding
+ * this plugin's fields; otherwise composition seeds such as `translation`
+ * would fall back to the schema defaults on the first card save.
+ * @param target - profile row plus editor.
+ * @param settings - complete preference snapshot to persist.
+ * @returns fulfillment after the Loader reconciled the profile patch.
+ */
+async function persistSettings(target: ConfigTarget, settings: StreamSettings): Promise<void> {
+  await target.editor.edit(target.entry, (current, inherited) => ({
+    ...inherited,
+    ...current,
+    ...settings,
+  }))
+}
+
+/**
+ * Host half: bridge the composition config to the browser half, keep the
+ * reasoning-translation bridge alive, and serve the Plugins-page card over the
+ * plugin-owned loopback RPC. Preferences are stored in the profile entry config
+ * through `configEditor` (0.2.x native path); volatile fields make an edit reach
+ * the running renderer without re-activating this entry.
  * @param ctx - Host context carrying the web server service when composed.
- * @param config - Schema-validated configuration with defaults filled.
+ * @param config - Schema-validated configuration (volatile fields are refs).
  */
 export function apply(ctx: Context, config: Config): void {
   console.log(
-    `[dsh-think-box] plugin loaded! mode=${config.mode} preset=${config.preset} `
+    `[dsh-think-box] plugin loaded! mode=${config.mode} preset=${readSettings(config).preset} `
     + `seed=${config.revealCharsPerSec}cps scroll=${config.scrollSpeedPxPerSec}px/s `
     + `maxScroll=${config.maxScrollSpeedPxPerSec}px/s `
     + `translation=${config.translation.backend}`
@@ -115,9 +378,13 @@ export function apply(ctx: Context, config: Config): void {
       ? ` route=${config.translation.provider}/${config.translation.model}`
       : ''),
   )
+  // The web boot graph carries no per-entry config, so the validated value is
+  // injected into every served index response as a boot global the client
+  // entry reads at apply time. Volatile references are read here - the inline
+  // script only ever receives plain data.
   ctx.inject(['webServer'], (httpCtx) => {
     httpCtx.effect(
-      () => httpCtx.webServer.tapIndex(html => injectStreamConfig(html, config)),
+      () => httpCtx.webServer.tapIndex(html => injectStreamConfig(html, bootSnapshot(config))),
       'dsh-smooth-stream: boot config bridge',
     )
   })
@@ -137,302 +404,151 @@ export function apply(ctx: Context, config: Config): void {
       createTranslationHandler(route, translationStore) as unknown as ConnectionRpcHandler,
     )
   })
-  // The core settings RPC deliberately filters third-party namespaces. Keep
-  // the durable provider as the authority, but expose this one schema through
-  // the plugin's own loopback-only connection channel instead.
+  // The preferences are no longer a settings namespace, so the auto-generated
+  // settings page would render a second, empty form for this entry. Disable it;
+  // the card below owns the edit surface.
   ctx.inject(['settings'], (settingsCtx) => {
-  // dsh 0.1.x: durable plugin-owned namespace registered on the settings
-  // service. dsh 0.2.x: `register` is gone — SettingsForms owns persistence
-  // through profile entry config — so serve the card read-only from the
-  // composition config until that migration lands, and keep the channel
-  // reachable so the card renders instead of dying as a 405.
-  const settingsSvc = settingsCtx.settings
-  const legacyRegister = (settingsSvc as { register?: unknown }).register
-  if (typeof legacyRegister !== 'function') {
-    const view02 = (): StreamSettingsView => ({
-      version: STREAM_PACKAGE_VERSION,
-      installation: inspectProfileInstallation(ctx.baseUrl, STREAM_PACKAGE_NAME).kind,
-      writable: false,
-      enabled: DEFAULT_STREAM_SETTINGS.enabled,
-      controlScroll: DEFAULT_STREAM_SETTINGS.controlScroll,
-      preset: config.preset,
-      motionPreference: DEFAULT_STREAM_SETTINGS.motionPreference,
-      thinkAutoExpand: DEFAULT_STREAM_SETTINGS.thinkAutoExpand,
-      logarithmicFade: DEFAULT_STREAM_SETTINGS.logarithmicFade,
-      canUpgrade: false,
-    })
-    const handle02: ConnectionRpcHandler = async (endpoint) => {
-      if (endpoint === STREAM_SETTINGS_RPC.read) return { ok: true, value: view02() }
-      if (endpoint === STREAM_SETTINGS_RPC.debugRead) {
-        return { ok: true, value: { debugEnabled: DEFAULT_STREAM_SETTINGS.debugEnabled, tuning: DEFAULT_STREAM_SETTINGS.debugTuning } }
+    settingsCtx.effect(() => {
+      const forms = settingsCtx.get('settings') as unknown as {
+        configure?: (presentation: { auto?: boolean }, owner: unknown) => () => void
       }
-      if (endpoint === STREAM_SETTINGS_RPC.upgrade) {
-        const installation = inspectProfileInstallation(ctx.baseUrl, STREAM_PACKAGE_NAME)
-        if (installation.kind !== 'npm') {
-          return { ok: false, error: { code: 'internal', message: 'smooth-stream is not an npm profile dependency', details: {} } }
-        }
-        return { ok: false, error: { code: 'internal', message: 'upgrade is unavailable until the 0.2.x settings migration lands', details: {} } }
-      }
-      return {
-        ok: false,
-        error: {
-          code: 'settings-rejected',
-          message: 'smooth-stream settings are read-only on dsh 0.2.x; durable storage moved to profile entry config',
-          details: { ns: STREAM_SETTINGS_NS },
-        },
-      }
-    }
-    // The connection service is not injectable from a plugin scope on 0.2.x,
-    // so mount through the web server fiber. registerSettingsChannel serves
-    // the route unfenced there (loopback + app token gate remain).
-    ctx.inject(['webServer'], (webCtx) => {
-      registerSettingsChannel(webCtx, STREAM_SETTINGS_RPC_CHANNEL, handle02)
-    })
-    return
-  }
-  const settingsNamespace = STREAM_SETTINGS_NS as SettingsNamespace
-  const scope = settingsCtx.settings.register(
-      settingsNamespace,
-      StreamSettingsSchema,
-      {
-        // The install-time entry config is the composition base, so it resolves
-        // *below* the user layer: a stored pick still wins, while "the user
-        // never chose" keeps following the overlay (cordis.patch.yml / profile
-        // config). Keeping it out of the schema default is what makes those two
-        // states distinguishable at all.
-        base: { preset: config.preset },
-        applies: 'live',
-      },
-    )
-    settingsCtx.inject(['connection'], (connectionCtx) => {
-      let upgrade: Promise<void> | undefined
-
-      const view = (): StreamSettingsView => {
-        const installation = inspectProfileInstallation(connectionCtx.baseUrl, STREAM_PACKAGE_NAME)
-        const settings = scope.get()
-        return {
-          version: STREAM_PACKAGE_VERSION,
-          installation: installation.kind,
-          writable: connectionCtx.settings.writable,
-          enabled: settings.enabled,
-          controlScroll: settings.controlScroll,
-          preset: settings.preset ?? config.preset,
-          motionPreference: settings.motionPreference,
-          thinkAutoExpand: settings.thinkAutoExpand,
-          logarithmicFade: settings.logarithmicFade,
-          canUpgrade: installation.kind === 'npm',
-        }
-      }
-
-      const debugView = (): StreamDebugSettingsView => {
-        const settings = scope.get()
-        return {
-          debugEnabled: settings.debugEnabled,
-          tuning: { ...settings.debugTuning },
-        }
-      }
-
-      const validDebugTuning = (value: unknown): value is StreamDebugTuning => {
-        if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
-        const tuning = value as Record<string, unknown>
-        return typeof tuning.revealScale === 'number'
-          && tuning.revealScale >= 0.25 && tuning.revealScale <= 2
-          && typeof tuning.queuePressure === 'number'
-          && tuning.queuePressure >= 0 && tuning.queuePressure <= 2
-          && typeof tuning.maxRevealCps === 'number'
-          && tuning.maxRevealCps >= 120 && tuning.maxRevealCps <= 1000
-          && typeof tuning.springStiffness === 'number'
-          && tuning.springStiffness >= 40 && tuning.springStiffness <= 320
-          && typeof tuning.springDamping === 'number'
-          && tuning.springDamping >= 8 && tuning.springDamping <= 80
-          && typeof tuning.springMass === 'number'
-          && tuning.springMass >= 0.5 && tuning.springMass <= 3
-          && typeof tuning.runwayPx === 'number'
-          && tuning.runwayPx >= 0 && tuning.runwayPx <= 120
-          && typeof tuning.reserveResponseMs === 'number'
-          && tuning.reserveResponseMs >= 60 && tuning.reserveResponseMs <= 600
-          && typeof tuning.backpressureMinScale === 'number'
-          && tuning.backpressureMinScale >= 0.25 && tuning.backpressureMinScale <= 1
-      }
-
-      const handle: ConnectionRpcHandler = async (endpoint, payload) => {
-        if (endpoint === STREAM_SETTINGS_RPC.read) return { ok: true, value: view() }
-        if (endpoint === STREAM_SETTINGS_RPC.write) {
-          if (typeof payload !== 'object' || payload === null || Array.isArray(payload)
-            || typeof (payload as { enabled?: unknown }).enabled !== 'boolean'
-            || typeof (payload as { controlScroll?: unknown }).controlScroll !== 'boolean'
-            || typeof (payload as { thinkAutoExpand?: unknown }).thinkAutoExpand !== 'boolean'
-          ) {
-            return {
-              ok: false,
-              error: {
-                code: 'settings-rejected',
-                message: 'enabled, controlScroll and thinkAutoExpand must be booleans',
-                details: { ns: STREAM_SETTINGS_NS },
-              },
-            }
-          }
-          if (!connectionCtx.settings.writable) {
-            return {
-              ok: false,
-              error: {
-                code: 'settings-rejected',
-                message: 'smooth-stream settings are read-only',
-                details: { ns: STREAM_SETTINGS_NS },
-              },
-            }
-          }
-          try {
-            const next = payload as {
-              enabled: boolean
-              controlScroll: boolean
-              preset?: unknown
-              motionPreference?: unknown
-              thinkAutoExpand: boolean
-              logarithmicFade?: unknown
-              debugEnabled?: unknown
-              debugTuning?: unknown
-            }
-            if (
-              next.preset !== undefined
-              && next.preset !== 'realtime'
-              && next.preset !== 'balanced'
-              && next.preset !== 'silky'
-            ) {
-              return {
-                ok: false,
-                error: {
-                  code: 'settings-rejected',
-                  message: 'preset must be one of realtime | balanced | silky',
-                  details: { ns: STREAM_SETTINGS_NS },
-                },
-              }
-            }
-            if (
-              next.motionPreference !== undefined
-              && next.motionPreference !== 'auto'
-              && next.motionPreference !== 'force-smooth'
-              && next.motionPreference !== 'force-reduced'
-            ) {
-              return {
-                ok: false,
-                error: {
-                  code: 'settings-rejected',
-                  message: 'motionPreference must be one of auto | force-smooth | force-reduced',
-                  details: { ns: STREAM_SETTINGS_NS },
-                },
-              }
-            }
-            if (next.logarithmicFade !== undefined && typeof next.logarithmicFade !== 'boolean') {
-              return {
-                ok: false,
-                error: {
-                  code: 'settings-rejected',
-                  message: 'logarithmicFade must be a boolean',
-                  details: { ns: STREAM_SETTINGS_NS },
-                },
-              }
-            }
-            const hasDebug = next.debugEnabled !== undefined || next.debugTuning !== undefined
-            if (hasDebug && (typeof next.debugEnabled !== 'boolean' || !validDebugTuning(next.debugTuning))) {
-              return {
-                ok: false,
-                error: {
-                  code: 'settings-rejected',
-                  message: 'debugEnabled and debugTuning must be provided together and be valid',
-                  details: { ns: STREAM_SETTINGS_NS },
-                },
-              }
-            }
-            await scope.update({
-              enabled: next.enabled,
-              controlScroll: next.controlScroll,
-              ...(next.preset === undefined ? {} : { preset: next.preset }),
-              ...(next.motionPreference === undefined ? {} : { motionPreference: next.motionPreference }),
-              thinkAutoExpand: next.thinkAutoExpand,
-              ...(next.logarithmicFade === undefined ? {} : { logarithmicFade: next.logarithmicFade }),
-              ...(hasDebug ? { debugEnabled: next.debugEnabled, debugTuning: next.debugTuning } : {}),
-            })
-          } catch {
-            return {
-              ok: false,
-              error: {
-                code: 'settings-rejected',
-                message: 'smooth-stream settings update failed',
-                details: { ns: STREAM_SETTINGS_NS },
-              },
-            }
-          }
-          return { ok: true, value: view() }
-        }
-        if (endpoint === STREAM_SETTINGS_RPC.debugRead) return { ok: true, value: debugView() }
-        if (endpoint === STREAM_SETTINGS_RPC.debugWrite) {
-          if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
-            return {
-              ok: false,
-              error: {
-                code: 'settings-rejected',
-                message: 'debug settings must be an object',
-                details: { ns: STREAM_SETTINGS_NS },
-              },
-            }
-          }
-          const next = payload as { debugEnabled?: unknown; tuning?: unknown }
-          if (typeof next.debugEnabled !== 'boolean' || !validDebugTuning(next.tuning)) {
-            return {
-              ok: false,
-              error: {
-                code: 'settings-rejected',
-                message: 'debugEnabled and tuning are malformed',
-                details: { ns: STREAM_SETTINGS_NS },
-              },
-            }
-          }
-          if (!connectionCtx.settings.writable) {
-            return {
-              ok: false,
-              error: {
-                code: 'settings-rejected',
-                message: 'smooth-stream debug settings are read-only',
-                details: { ns: STREAM_SETTINGS_NS },
-              },
-            }
-          }
-          try {
-            await scope.update({ debugEnabled: next.debugEnabled, debugTuning: next.tuning })
-          } catch {
-            return {
-              ok: false,
-              error: {
-                code: 'settings-rejected',
-                message: 'smooth-stream debug settings update failed',
-                details: { ns: STREAM_SETTINGS_NS },
-              },
-            }
-          }
-          return { ok: true, value: debugView() }
-        }
-        if (endpoint === STREAM_SETTINGS_RPC.upgrade) {
-          const installation = inspectProfileInstallation(connectionCtx.baseUrl, STREAM_PACKAGE_NAME)
-          if (installation.kind !== 'npm') {
-            return { ok: false, error: { code: 'internal', message: 'smooth-stream is not an npm profile dependency', details: {} } }
-          }
-          if (upgrade !== undefined) {
-            return { ok: false, error: { code: 'internal', message: 'smooth-stream update is already running', details: {} } }
-          }
-          upgrade = updateNpmProfilePackage(installation.profileDir, STREAM_PACKAGE_NAME)
-          try {
-            await upgrade
-          } catch {
-            return { ok: false, error: { code: 'internal', message: 'smooth-stream update failed', details: {} } }
-          } finally {
-            upgrade = undefined
-          }
-          return { ok: true, value: { restartRequired: true } }
-        }
-        return { ok: false, error: { code: 'internal', message: `unknown smooth-stream endpoint ${JSON.stringify(endpoint)}`, details: {} } }
-      }
-      registerSettingsChannel(connectionCtx, STREAM_SETTINGS_RPC_CHANNEL, handle)
-    })
+      if (typeof forms.configure !== 'function') return () => {}
+      return forms.configure({ auto: false }, ctx.fiber)
+    }, 'dsh-smooth-stream: settings page policy')
   })
+
+  /** The current card view, including whether a profile write is possible. */
+  const view = (): StreamSettingsView => {
+    const settings = readSettings(config)
+    const installation = inspectProfileInstallation(ctx.baseUrl, STREAM_PACKAGE_NAME)
+    return {
+      version: STREAM_PACKAGE_VERSION,
+      installation: installation.kind,
+      writable: resolveConfigTarget(ctx) !== undefined,
+      enabled: settings.enabled,
+      controlScroll: settings.controlScroll,
+      preset: settings.preset,
+      motionPreference: settings.motionPreference,
+      thinkAutoExpand: settings.thinkAutoExpand,
+      logarithmicFade: settings.logarithmicFade,
+      canUpgrade: installation.kind === 'npm',
+    }
+  }
+
+  /** The diagnostics view; the tuning object is a detached copy. */
+  const debugView = (): StreamDebugSettingsView => {
+    const settings = readSettings(config)
+    return {
+      debugEnabled: settings.debugEnabled,
+      tuning: { ...settings.debugTuning },
+    }
+  }
+
+  let upgrade: Promise<void> | undefined
+
+  /** Reject a write when this deployment cannot persist profile config. */
+  const readOnly = <T>(): T => ({
+    ok: false,
+    error: {
+      code: 'settings-rejected',
+      message: 'smooth-stream settings are read-only: no config editor entry is available in this profile',
+      details: { ns: STREAM_SETTINGS_NS },
+    },
+  }) as T
+
+  const handle: ConnectionRpcHandler = async (endpoint, payload) => {
+    if (endpoint === STREAM_SETTINGS_RPC.read) return { ok: true, value: view() }
+    if (endpoint === STREAM_SETTINGS_RPC.write) {
+      const target = resolveConfigTarget(ctx)
+      if (target === undefined) return readOnly()
+      const merged = mergeSettingsPatch(readSettings(config), payload, true)
+      if (!merged.ok) {
+        return { ok: false, error: { code: 'settings-rejected', message: merged.message, details: { ns: STREAM_SETTINGS_NS } } }
+      }
+      try {
+        await persistSettings(target, merged.settings)
+      } catch {
+        return {
+          ok: false,
+          error: {
+            code: 'settings-rejected',
+            message: 'smooth-stream settings could not be saved to the profile',
+            details: { ns: STREAM_SETTINGS_NS },
+          },
+        }
+      }
+      // The Loader commits volatile config as part of the reconcile above; the
+      // local write keeps the RPC response consistent even on kernels whose
+      // reconcile returns before the reference update lands.
+      writeSettingsRefs(config, merged.settings)
+      return { ok: true, value: view() }
+    }
+    if (endpoint === STREAM_SETTINGS_RPC.debugRead) return { ok: true, value: debugView() }
+    if (endpoint === STREAM_SETTINGS_RPC.debugWrite) {
+      const target = resolveConfigTarget(ctx)
+      if (target === undefined) return readOnly()
+      const current = readSettings(config)
+      const merged = mergeSettingsPatch(current, {
+        enabled: current.enabled,
+        controlScroll: current.controlScroll,
+        thinkAutoExpand: current.thinkAutoExpand,
+        debugEnabled: (payload as { debugEnabled?: unknown }).debugEnabled,
+        debugTuning: (payload as { tuning?: unknown }).tuning,
+      }, true)
+      if (!merged.ok) {
+        return { ok: false, error: { code: 'settings-rejected', message: merged.message, details: { ns: STREAM_SETTINGS_NS } } }
+      }
+      try {
+        await persistSettings(target, merged.settings)
+      } catch {
+        return {
+          ok: false,
+          error: {
+            code: 'settings-rejected',
+            message: 'smooth-stream debug settings could not be saved to the profile',
+            details: { ns: STREAM_SETTINGS_NS },
+          },
+        }
+      }
+      writeSettingsRefs(config, merged.settings)
+      return { ok: true, value: debugView() }
+    }
+    if (endpoint === STREAM_SETTINGS_RPC.upgrade) {
+      const installation = inspectProfileInstallation(ctx.baseUrl, STREAM_PACKAGE_NAME)
+      if (installation.kind !== 'npm') {
+        return { ok: false, error: { code: 'internal', message: 'smooth-stream is not an npm profile dependency', details: {} } }
+      }
+      if (upgrade !== undefined) {
+        return { ok: false, error: { code: 'internal', message: 'smooth-stream update is already running', details: {} } }
+      }
+      upgrade = updateNpmProfilePackage(installation.profileDir, STREAM_PACKAGE_NAME)
+      try {
+        await upgrade
+      } catch {
+        return { ok: false, error: { code: 'internal', message: 'smooth-stream update failed', details: {} } }
+      } finally {
+        upgrade = undefined
+      }
+      return { ok: true, value: { restartRequired: true } }
+    }
+    return { ok: false, error: { code: 'internal', message: `unknown smooth-stream endpoint ${JSON.stringify(endpoint)}`, details: {} } }
+  }
+
+  // Mount the card channel on whichever fiber can own it: the Connection
+  // service path when that service is injectable, otherwise the web server's
+  // direct route (registerSettingsChannel serves the same envelopes and keeps
+  // the loopback-only policy). Mounting is unconditional: the card must not
+  // disappear because no settings namespace exists any more.
+  let mounted = false
+  const mountChannel = (mountCtx: Context): void => {
+    if (mounted) return
+    mounted = true
+    const dispose = registerSettingsChannel(mountCtx, STREAM_SETTINGS_RPC_CHANNEL, handle)
+    mountCtx.effect(() => () => {
+      mounted = false
+      dispose()
+    }, 'dsh-smooth-stream: settings channel lifetime')
+  }
+  ctx.inject(['connection'], mountChannel)
+  ctx.inject(['webServer'], mountChannel)
 }

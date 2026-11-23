@@ -31,7 +31,7 @@ import {
   type StreamConfig,
   type TranslationConfig,
 } from '../config.ts'
-import { DEFAULT_STREAM_SETTINGS, STREAM_SETTINGS_NS, type StreamSettings } from '../settings.ts'
+import { DEFAULT_STREAM_SETTINGS, STREAM_SETTINGS_NS, type StreamDebugTuning, type StreamSettings } from '../settings.ts'
 
 /**
  * Cordis services required by the browser half. Only `slots` is load-bearing
@@ -45,6 +45,19 @@ type AssistantProps = ChatNodeViewProps<'assistant-step'>
 
 const STREAM_MODES: readonly string[] = ['typewriter', 'teleprompter']
 const STREAM_PRESETS: readonly string[] = ['realtime', 'balanced', 'silky']
+
+/** Numeric fields the boot snapshot must carry for the diagnostics panel. */
+const BOOT_DEBUG_TUNING_KEYS = [
+  'revealScale',
+  'queuePressure',
+  'maxRevealCps',
+  'springStiffness',
+  'springDamping',
+  'springMass',
+  'runwayPx',
+  'reserveResponseMs',
+  'backpressureMinScale',
+] as const
 
 /**
  * The assistant renderer owns its own character queue and conversation
@@ -103,6 +116,7 @@ function readBootConfig(): StreamConfig {
     console.info('[dsh-smooth-stream] no host config bridge; using defaults')
     return DEFAULT_STREAM_CONFIG
   }
+  const snapshot = readSettingsSnapshot(raw)
   if (
     typeof raw !== 'object' || raw === null
     || !STREAM_MODES.includes((raw as StreamConfig).mode)
@@ -110,10 +124,49 @@ function readBootConfig(): StreamConfig {
     || typeof (raw as StreamConfig).revealCharsPerSec !== 'number'
     || typeof (raw as StreamConfig).scrollSpeedPxPerSec !== 'number'
     || typeof (raw as StreamConfig).maxScrollSpeedPxPerSec !== 'number'
+    || snapshot === undefined
   ) {
     throw new Error(`[dsh-smooth-stream] malformed ${STREAM_BOOT_GLOBAL} boot global: ${JSON.stringify(raw)}`)
   }
   return { ...raw as StreamConfig, translation: readTranslationConfig((raw as { translation?: unknown }).translation) }
+}
+
+/**
+ * Validate the preference snapshot the Host folds into the boot global. The
+ * Host reads every volatile config reference before injecting the script, so
+ * these are plain values here; a missing or malformed field means the two
+ * halves disagree and must fail loudly instead of rendering defaults.
+ * @param raw - boot global value.
+ * @returns the validated preferences, or `undefined` when malformed.
+ */
+function readSettingsSnapshot(raw: unknown): StreamSettings | undefined {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return undefined
+  const value = raw as Record<string, unknown>
+  const tuning = value.debugTuning
+  if (
+    typeof value.enabled !== 'boolean'
+    || typeof value.controlScroll !== 'boolean'
+    || typeof value.preset !== 'string' || !STREAM_PRESETS.includes(value.preset as StreamSettings['preset'])
+    || value.motionPreference !== 'auto' && value.motionPreference !== 'force-smooth' && value.motionPreference !== 'force-reduced'
+    || typeof value.thinkAutoExpand !== 'boolean'
+    || typeof value.logarithmicFade !== 'boolean'
+    || typeof value.debugEnabled !== 'boolean'
+    || typeof tuning !== 'object' || tuning === null || Array.isArray(tuning)
+  ) return undefined
+  const tuningValue = tuning as Record<string, unknown>
+  for (const key of BOOT_DEBUG_TUNING_KEYS) {
+    if (typeof tuningValue[key] !== 'number') return undefined
+  }
+  return {
+    enabled: value.enabled,
+    controlScroll: value.controlScroll,
+    preset: value.preset as StreamSettings['preset'],
+    motionPreference: value.motionPreference,
+    thinkAutoExpand: value.thinkAutoExpand,
+    logarithmicFade: value.logarithmicFade,
+    debugEnabled: value.debugEnabled,
+    debugTuning: tuning as unknown as StreamDebugTuning,
+  }
 }
 
 /**
@@ -206,14 +259,21 @@ function wrapAgentChatRows(
 
 /**
  * A live settings cell shared by the renderer lifecycle and React views. It
- * starts on the shared defaults and follows the plugin-owned controller once
- * the optional settings services arrive.
+ * starts on the Host's boot snapshot (the resolved profile config read through
+ * the volatile references at Host apply time) and follows the plugin-owned
+ * controller once the optional settings services arrive. Without a Host bridge
+ * the shared defaults apply.
  */
 class SettingsCell {
   private readonly listeners = new Set<() => void>()
   private card: SmoothStreamCardController | undefined
-  private value: StreamSettings = DEFAULT_STREAM_SETTINGS
+  private value: StreamSettings
   private pending = false
+
+  /** @param initial - boot-time snapshot to render before the card resolves. */
+  constructor(initial: StreamSettings = DEFAULT_STREAM_SETTINGS) {
+    this.value = initial
+  }
 
   /** Re-point the cell at the plugin-owned settings controller. */
   attach(card: SmoothStreamCardController): () => void {
@@ -318,7 +378,9 @@ export function apply(ctx: ClientContext): void {
     for (const dispose of [...disposers].reverse()) dispose()
   })
   const config = readBootConfig()
-  const settings = new SettingsCell()
+  // First render uses the Host's resolved snapshot; the card RPC then supplies
+  // live values and edits.
+  const settings = new SettingsCell(readSettingsSnapshot(config) ?? DEFAULT_STREAM_SETTINGS)
   const translation = new TranslationRuntime(config.translation)
   let translationSettingsApi: TranslationSettingsApi | undefined
   const waitTranslationApi = async (): Promise<TranslationSettingsApi> => {

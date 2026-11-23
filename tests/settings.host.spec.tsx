@@ -11,9 +11,9 @@
 import { Context } from '@deepseek-ai/cordis'
 import type { ConnectionRpcHandler, ConnectionRpcHandlerOptions } from '@deepseek-ai/dsh-client-connection'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { StreamConfig, Volatile } from '../src/config.ts'
+import type { ThinkBoxConfig, Volatile } from '../src/config.ts'
 import { apply, Config, type Config as ResolvedConfig } from '../src/plugin.ts'
-import { STREAM_SETTINGS_RPC } from '../src/settings-api.ts'
+import { THINK_BOX_SETTINGS_RPC } from '../src/settings-api.ts'
 
 /** One recorded RPC registration, so a test can drive the handler directly. */
 interface RpcRegistration {
@@ -95,7 +95,7 @@ function ref<T>(value: T): Volatile<T> {
  * are built here; the deployed 0.2.2 host creates the identical shape.
  */
 function resolveConfig(raw: unknown = {}): ResolvedConfig {
-  const withDefaults = Config(raw as never) as unknown as StreamConfig
+  const withDefaults = Config(raw as never) as unknown as ThinkBoxConfig
   return {
     ...withDefaults,
     enabled: ref(withDefaults.enabled),
@@ -182,8 +182,8 @@ async function mountHost(options: HostOptions = {}): Promise<Host> {
     ...(registration === undefined ? {} : { registration }),
     ...(web === undefined ? {} : { web }),
     settingsCalls,
-    read: () => handler()(STREAM_SETTINGS_RPC.read, {}, signal()),
-    write: payload => handler()(STREAM_SETTINGS_RPC.write, payload, signal()),
+    read: () => handler()(THINK_BOX_SETTINGS_RPC.read, {}, signal()),
+    write: payload => handler()(THINK_BOX_SETTINGS_RPC.write, payload, signal()),
     unknown: () => handler()('debug.read', {}, signal()),
   }
 }
@@ -297,7 +297,7 @@ describe('think-box host settings', () => {
     const host = await mountHost({ withWebServer: true })
     disposers.push(host.fiber.dispose)
     const html = host.web?.bootHtml() ?? ''
-    expect(html).toContain('__DSH_SMOOTH_STREAM_CONFIG__')
+    expect(html).toContain('__DSH_THINK_BOX_CONFIG__')
     const payload = JSON.parse(/window\[[^\]]+\]=(\{.*?\})<\/script>/.exec(html)?.[1] ?? '{}') as Record<string, unknown>
     expect(Object.keys(payload).sort()).toEqual(['enabled', 'thinkAutoExpand', 'translation'])
     expect(payload).toMatchObject({ enabled: true, thinkAutoExpand: true })
@@ -322,7 +322,7 @@ describe('think-box host settings', () => {
 
 describe('plugin Config schema', () => {
   it('fills the three defaults when the overlay config is omitted', () => {
-    const resolved = Config({} as never) as unknown as StreamConfig
+    const resolved = Config({} as never) as unknown as ThinkBoxConfig
     expect(resolved).toMatchObject({ enabled: true, thinkAutoExpand: true })
     expect(resolved.translation).toMatchObject({ backend: 'bundle' })
   })
@@ -335,7 +335,7 @@ describe('plugin Config schema', () => {
       mode: 'teleprompter',
       preset: 'silky',
       debugEnabled: true,
-    } as never) as unknown as StreamConfig
+    } as never) as unknown as ThinkBoxConfig
     expect(resolved).toMatchObject({
       enabled: false,
       thinkAutoExpand: false,

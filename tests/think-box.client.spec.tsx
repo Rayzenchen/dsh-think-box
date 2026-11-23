@@ -15,9 +15,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createElement } from 'react'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { TypewriterAssistantNodeView } from '../src/client/TypewriterAssistantNodeView.tsx'
+import { ReasoningAssistantNodeView } from '../src/client/ReasoningAssistantNodeView.tsx'
 import { apply, inject } from '../src/client/index.ts'
-import { DEFAULT_STREAM_CONFIG, STREAM_BOOT_GLOBAL } from '../src/config.ts'
+import { DEFAULT_THINK_BOX_CONFIG, THINK_BOX_BOOT_GLOBAL } from '../src/config.ts'
 import { chatZh } from '../src/client/locales.ts'
 import { FrameCoordinator } from '../src/client/FrameCoordinator.ts'
 import type { ReasoningTranslationFace } from '../src/client/reasoningTranslation.ts'
@@ -29,14 +29,14 @@ afterEach(() => {
   FrameCoordinator.forDocument(document).shutdown()
   vi.useRealTimers()
   vi.unstubAllGlobals()
-  delete (globalThis as Record<string, unknown>)[STREAM_BOOT_GLOBAL]
+  delete (globalThis as Record<string, unknown>)[THINK_BOX_BOOT_GLOBAL]
 })
 
 function assistantProps(
   status: 'running' | 'settled',
   blocks: unknown[],
   extra: Record<string, unknown> = {},
-): Parameters<typeof TypewriterAssistantNodeView>[0] {
+): Parameters<typeof ReasoningAssistantNodeView>[0] {
   return {
     node: {
       kind: 'assistant-step',
@@ -48,13 +48,13 @@ function assistantProps(
     fileMentions: () => undefined,
     t: (key: string) => (chatZh as Record<string, string>)[key] ?? key,
     ...extra,
-  } as unknown as Parameters<typeof TypewriterAssistantNodeView>[0]
+  } as unknown as Parameters<typeof ReasoningAssistantNodeView>[0]
 }
 
 const REASONING = { kind: 'reasoning', text: 'first line\nlatest tokens' }
 
 describe('boot snapshot', () => {
-  async function registeredContainer(props: Parameters<typeof TypewriterAssistantNodeView>[0]): Promise<HTMLElement> {
+  async function registeredContainer(props: Parameters<typeof ReasoningAssistantNodeView>[0]): Promise<HTMLElement> {
     const ctx = new Context()
     await ctx.plugin(SlotRegistry).await()
     ctx.slots.register({
@@ -71,10 +71,10 @@ describe('boot snapshot', () => {
   }
 
   it('ignores extra fields from an older Host boot snapshot', async () => {
-    ;(globalThis as Record<string, unknown>)[STREAM_BOOT_GLOBAL] = {
+    ;(globalThis as Record<string, unknown>)[THINK_BOX_BOOT_GLOBAL] = {
       enabled: true,
       thinkAutoExpand: true,
-      translation: DEFAULT_STREAM_CONFIG.translation,
+      translation: DEFAULT_THINK_BOX_CONFIG.translation,
       mode: 'typewriter',
       preset: 'silky',
       controlScroll: false,
@@ -86,7 +86,7 @@ describe('boot snapshot', () => {
 
   it('uses defaults when the boot snapshot predates the two preferences', async () => {
     const info = vi.spyOn(console, 'info').mockImplementation(() => {})
-    ;(globalThis as Record<string, unknown>)[STREAM_BOOT_GLOBAL] = { mode: 'typewriter', preset: 'balanced' }
+    ;(globalThis as Record<string, unknown>)[THINK_BOX_BOOT_GLOBAL] = { mode: 'typewriter', preset: 'balanced' }
     try {
       const container = await registeredContainer(assistantProps('running', [REASONING]))
       expect(container.querySelector('[data-variant="think"]')).not.toBeNull()
@@ -97,7 +97,7 @@ describe('boot snapshot', () => {
   })
 
   it('fails loudly when a preference is present but malformed', async () => {
-    ;(globalThis as Record<string, unknown>)[STREAM_BOOT_GLOBAL] = { enabled: 'yes', thinkAutoExpand: true }
+    ;(globalThis as Record<string, unknown>)[THINK_BOX_BOOT_GLOBAL] = { enabled: 'yes', thinkAutoExpand: true }
     await expect(registeredContainer(assistantProps('running', [REASONING])))
       .rejects.toThrow(/malformed/)
   })
@@ -105,7 +105,7 @@ describe('boot snapshot', () => {
 
 describe('reasoning box', () => {
   it('renders the inline preview while reasoning streams', () => {
-    const view = render(createElement(TypewriterAssistantNodeView, assistantProps('running', [REASONING])))
+    const view = render(createElement(ReasoningAssistantNodeView, assistantProps('running', [REASONING])))
     const row = view.container.querySelector('[data-disclosure-row]')
     expect(row).not.toBeNull()
     expect(row?.getAttribute('aria-expanded')).toBe('false')
@@ -117,7 +117,7 @@ describe('reasoning box', () => {
   })
 
   it('opens the full reasoning body on a row click and closes it again', () => {
-    const view = render(createElement(TypewriterAssistantNodeView, assistantProps('running', [REASONING])))
+    const view = render(createElement(ReasoningAssistantNodeView, assistantProps('running', [REASONING])))
     const row = view.container.querySelector('[data-disclosure-row]') as HTMLElement
     fireEvent.click(row)
     expect(row.getAttribute('aria-expanded')).toBe('true')
@@ -130,9 +130,9 @@ describe('reasoning box', () => {
   it('settles into the single-line state after the flourish', async () => {
     vi.useFakeTimers({ toFake: [...FAKE] })
     const block = { kind: 'reasoning', text: 'first line\n\nsecond' }
-    const view = render(createElement(TypewriterAssistantNodeView, assistantProps('running', [block])))
+    const view = render(createElement(ReasoningAssistantNodeView, assistantProps('running', [block])))
     expect(view.container.querySelector('[data-follow-end]')).not.toBeNull()
-    view.rerender(createElement(TypewriterAssistantNodeView, assistantProps('settled', [block])))
+    view.rerender(createElement(ReasoningAssistantNodeView, assistantProps('settled', [block])))
     await act(() => vi.advanceTimersByTimeAsync(2000))
     expect(view.container.textContent).toContain('first line')
     expect(view.container.querySelector('[data-disclosure-row]')?.getAttribute('aria-expanded')).toBe('false')
@@ -143,13 +143,13 @@ describe('reasoning box', () => {
 
   it('keeps the groupPart split from duplicating the box or the answer', () => {
     const blocks = [REASONING, { kind: 'text', text: '**answer**' }]
-    const reasoningRow = render(createElement(TypewriterAssistantNodeView,
+    const reasoningRow = render(createElement(ReasoningAssistantNodeView,
       assistantProps('running', blocks, { groupPart: 'reasoning' })))
     expect(reasoningRow.container.querySelectorAll('[data-variant="think"]')).toHaveLength(1)
     expect(reasoningRow.container.textContent).not.toContain('**answer**')
     reasoningRow.unmount()
 
-    const responseRow = render(createElement(TypewriterAssistantNodeView,
+    const responseRow = render(createElement(ReasoningAssistantNodeView,
       assistantProps('running', blocks, { groupPart: 'response' })))
     expect(responseRow.container.querySelector('[data-variant="think"]')).toBeNull()
     expect(responseRow.getByText('answer').tagName).toBe('STRONG')
@@ -157,7 +157,7 @@ describe('reasoning box', () => {
 })
 
 describe('reasoning box contracts', () => {
-  const cssText = readFileSync(join(process.cwd(), 'src/client/TypewriterAssistantNodeView.module.css'), 'utf8')
+  const cssText = readFileSync(join(process.cwd(), 'src/client/ReasoningAssistantNodeView.module.css'), 'utf8')
 
   it('keeps the inline preview on the three-line geometry contract', () => {
     // `--dsh-thinking-inline-span: 2` plus the row chrome is the verified
@@ -166,7 +166,7 @@ describe('reasoning box contracts', () => {
     expect(cssText).toContain('.thinkInline[data-settled]')
     expect(cssText).toContain('--dsh-thinking-inline-span: 1;')
 
-    const view = render(createElement(TypewriterAssistantNodeView, assistantProps('running', [REASONING])))
+    const view = render(createElement(ReasoningAssistantNodeView, assistantProps('running', [REASONING])))
     const inline = view.container.querySelector('[data-follow-end]') as HTMLElement
     expect(inline.className).toContain('thinkInline')
     expect(inline.hasAttribute('data-settled')).toBe(false)
@@ -179,28 +179,28 @@ describe('reasoning box contracts', () => {
   it('plays the settle flourish once and never for a history mount', async () => {
     vi.useFakeTimers({ toFake: [...FAKE] })
     const block = { kind: 'reasoning', text: 'first line\nsecond line' }
-    const view = render(createElement(TypewriterAssistantNodeView, assistantProps('running', [block])))
-    view.rerender(createElement(TypewriterAssistantNodeView, assistantProps('settled', [block])))
+    const view = render(createElement(ReasoningAssistantNodeView, assistantProps('running', [block])))
+    view.rerender(createElement(ReasoningAssistantNodeView, assistantProps('settled', [block])))
     await act(() => vi.advanceTimersByTimeAsync(2000))
     expect(view.container.querySelector('[data-settled]')).not.toBeNull()
     const settledAt = view.container.querySelector('[data-follow-end]')
     expect(settledAt).toBeNull()
 
     // Later settled rerenders must not restart the flourish.
-    view.rerender(createElement(TypewriterAssistantNodeView, assistantProps('settled', [block])))
+    view.rerender(createElement(ReasoningAssistantNodeView, assistantProps('settled', [block])))
     await act(() => vi.advanceTimersByTimeAsync(2000))
     expect(view.container.querySelector('[data-follow-end]')).toBeNull()
     expect(view.container.querySelector('[data-settled]')).not.toBeNull()
 
     // Restoring a transcript mounts already settled: no flourish at all.
-    const history = render(createElement(TypewriterAssistantNodeView, assistantProps('settled', [block])))
+    const history = render(createElement(ReasoningAssistantNodeView, assistantProps('settled', [block])))
     expect(history.container.querySelector('[data-follow-end]')).toBeNull()
     expect(history.container.querySelector('[data-settled]')).not.toBeNull()
   })
 
   it('hides answer-inline reasoning through the Host turnProcess fold contract', () => {
     const block = { kind: 'reasoning', text: 'folded reasoning' }
-    const folded = render(createElement(TypewriterAssistantNodeView, assistantProps('running', [block], {
+    const folded = render(createElement(ReasoningAssistantNodeView, assistantProps('running', [block], {
       turnProcess: {
         foldable: true,
         open: false,
@@ -212,7 +212,7 @@ describe('reasoning box contracts', () => {
     expect(wrapper).not.toBeNull()
     expect(wrapper?.hasAttribute('hidden')).toBe(true)
 
-    const open = render(createElement(TypewriterAssistantNodeView, assistantProps('running', [block], {
+    const open = render(createElement(ReasoningAssistantNodeView, assistantProps('running', [block], {
       turnProcess: {
         foldable: true,
         open: true,
@@ -224,7 +224,7 @@ describe('reasoning box contracts', () => {
   })
 
   it('renders images through ImageGallery', async () => {
-    const view = render(createElement(TypewriterAssistantNodeView, assistantProps('settled', [{
+    const view = render(createElement(ReasoningAssistantNodeView, assistantProps('settled', [{
       kind: 'image',
       attachment: { attachmentId: 'img-1', mediaType: 'image/png', bytes: 4, width: 1, height: 1 },
     }], { loadImage: async () => 'data:image/png;base64,iVBORw0KGgo=' })))
@@ -232,7 +232,7 @@ describe('reasoning box contracts', () => {
   })
 
   it('leaves no follow, announcement, FPS or diagnostics traces in the tree', () => {
-    const view = render(createElement(TypewriterAssistantNodeView,
+    const view = render(createElement(ReasoningAssistantNodeView,
       assistantProps('running', [REASONING])))
     expect(view.container.querySelector('[data-follow-text]')).toBeNull()
     expect(view.container.querySelector('[aria-live]')).toBeNull()
@@ -247,7 +247,7 @@ describe('reasoning box contracts', () => {
       addEventListener: () => {},
       removeEventListener: () => {},
     }))
-    const view = render(createElement(TypewriterAssistantNodeView, assistantProps('running', [REASONING])))
+    const view = render(createElement(ReasoningAssistantNodeView, assistantProps('running', [REASONING])))
     await act(async () => { await Promise.resolve() })
     expect(view.container.textContent).toContain('latest tokens')
     expect(view.container.querySelector('[class*="scope"]')).toBeNull()
@@ -256,7 +256,7 @@ describe('reasoning box contracts', () => {
 
 describe('body renderer', () => {
   it('renders streaming Markdown directly, without a reveal or follow wrapper', () => {
-    const view = render(createElement(TypewriterAssistantNodeView,
+    const view = render(createElement(ReasoningAssistantNodeView,
       assistantProps('running', [{ kind: 'text', text: '**bold** tail' }])))
     expect(view.getByText('bold').tagName).toBe('STRONG')
     // No body follow host / reveal wrapper owns the answer any more.
@@ -265,7 +265,7 @@ describe('body renderer', () => {
   })
 
   it('renders unknown blocks through JsonBlock', () => {
-    const view = render(createElement(TypewriterAssistantNodeView,
+    const view = render(createElement(ReasoningAssistantNodeView,
       assistantProps('settled', [{ kind: 'other', block: { type: 'mystery', value: 1 } }])))
     expect(view.container.textContent).toContain('message.unknownBlock')
   })
@@ -337,7 +337,7 @@ describe('assistant-step takeover', () => {
   })
 
   it('does not take the row over when the boot preference disables it', async () => {
-    ;(globalThis as Record<string, unknown>)[STREAM_BOOT_GLOBAL] = { ...DEFAULT_STREAM_CONFIG, enabled: false }
+    ;(globalThis as Record<string, unknown>)[THINK_BOX_BOOT_GLOBAL] = { ...DEFAULT_THINK_BOX_CONFIG, enabled: false }
     const { slots, fiber } = await bench({ withBuiltin: true })
     expect(entryFor(slots)?.component).toBe(BuiltIn)
     await fiber.dispose()
@@ -351,7 +351,7 @@ describe('reasoning translation', () => {
   }
 
   it('switches the box to the translated feed on demand', async () => {
-    const view = render(createElement(TypewriterAssistantNodeView, assistantProps('running', [REASONING], {
+    const view = render(createElement(ReasoningAssistantNodeView, assistantProps('running', [REASONING], {
       translation: face,
       translationLabel: 'test · model',
       autoTranslate: false,

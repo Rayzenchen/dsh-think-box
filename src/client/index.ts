@@ -9,10 +9,10 @@ import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client
 import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
 import type { ChatNodeViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { claimApplyOwnership, type StandDown } from './applyOwnership.ts'
-import { TypewriterAssistantNodeView } from './TypewriterAssistantNodeView.tsx'
-import { SmoothStreamConfigPage } from './SmoothStreamCard.tsx'
-import { SmoothStreamCardController } from './smooth-stream-card-controller.ts'
-import { createSmoothStreamSettingsApi } from './smooth-stream-settings-api.ts'
+import { ReasoningAssistantNodeView } from './ReasoningAssistantNodeView.tsx'
+import { ThinkBoxConfigPage } from './ThinkBoxCard.tsx'
+import { ThinkBoxCardController } from './think-box-card-controller.ts'
+import { createThinkBoxSettingsApi } from './think-box-settings-api.ts'
 import {
   createReasoningTranslationFace,
   type CotTranslationRemote,
@@ -20,15 +20,15 @@ import {
 import { createHostTranslationFace } from './host-translation.ts'
 import { createTranslationSettingsApi, type TranslationSettingsApi } from './translation-settings-api.ts'
 import { TranslationRuntime } from './translation-runtime.ts'
-import type { TranslationCardBridge } from './smooth-stream-card-controller.ts'
+import type { TranslationCardBridge } from './think-box-card-controller.ts'
 import { NS as SETTINGS_NS, CHAT_NS, en, zh, chatEn, chatZh } from './locales.ts'
 import {
-  DEFAULT_STREAM_CONFIG,
-  STREAM_BOOT_GLOBAL,
-  type StreamConfig,
+  DEFAULT_THINK_BOX_CONFIG,
+  THINK_BOX_BOOT_GLOBAL,
+  type ThinkBoxConfig,
   type TranslationConfig,
 } from '../config.ts'
-import { DEFAULT_STREAM_SETTINGS, type StreamSettings } from '../settings.ts'
+import { DEFAULT_THINK_BOX_SETTINGS, type ThinkBoxSettings } from '../settings.ts'
 
 /**
  * Cordis services required by the browser half. Only `slots` is load-bearing
@@ -73,22 +73,22 @@ function isWrappableComponent(value: unknown): value is ComponentType<AssistantP
  * line; a present-but-broken preference is a hard error.
  * @returns The resolved configuration for the assistant node view.
  */
-function readBootConfig(): StreamConfig {
-  const raw = (globalThis as Record<string, unknown>)[STREAM_BOOT_GLOBAL]
+function readBootConfig(): ThinkBoxConfig {
+  const raw = (globalThis as Record<string, unknown>)[THINK_BOX_BOOT_GLOBAL]
   if (raw === undefined) {
-    console.info('[dsh-smooth-stream] no host config bridge; using defaults')
-    return DEFAULT_STREAM_CONFIG
+    console.info('[dsh-think-box] no host config bridge; using defaults')
+    return DEFAULT_THINK_BOX_CONFIG
   }
   const malformed = (): Error =>
-    new Error(`[dsh-smooth-stream] malformed ${STREAM_BOOT_GLOBAL} boot global: ${JSON.stringify(raw)}`)
+    new Error(`[dsh-think-box] malformed ${THINK_BOX_BOOT_GLOBAL} boot global: ${JSON.stringify(raw)}`)
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) throw malformed()
   const snapshot = readSettingsSnapshot(raw)
   if (snapshot === undefined && hasPreferenceFields(raw)) throw malformed()
   if (snapshot === undefined) {
     console.info(
-      `[dsh-smooth-stream] ${STREAM_BOOT_GLOBAL} predates the preference snapshot; using defaults`,
+      `[dsh-think-box] ${THINK_BOX_BOOT_GLOBAL} predates the preference snapshot; using defaults`,
     )
-    return DEFAULT_STREAM_CONFIG
+    return DEFAULT_THINK_BOX_CONFIG
   }
   return {
     enabled: snapshot.enabled,
@@ -104,7 +104,7 @@ function readBootConfig(): StreamConfig {
  * @param raw - boot global value.
  * @returns the validated preferences, or `undefined` when malformed.
  */
-function readSettingsSnapshot(raw: unknown): StreamSettings | undefined {
+function readSettingsSnapshot(raw: unknown): ThinkBoxSettings | undefined {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return undefined
   const value = raw as Record<string, unknown>
   if (typeof value.enabled !== 'boolean' || typeof value.thinkAutoExpand !== 'boolean') return undefined
@@ -118,9 +118,9 @@ function readSettingsSnapshot(raw: unknown): StreamSettings | undefined {
  * @returns the validated translation config.
  */
 function readTranslationConfig(raw: unknown): TranslationConfig {
-  if (raw === undefined) return DEFAULT_STREAM_CONFIG.translation
+  if (raw === undefined) return DEFAULT_THINK_BOX_CONFIG.translation
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
-    throw new Error(`[dsh-smooth-stream] malformed translation boot config: ${JSON.stringify(raw)}`)
+    throw new Error(`[dsh-think-box] malformed translation boot config: ${JSON.stringify(raw)}`)
   }
   const value = raw as Record<string, unknown>
   if (
@@ -134,7 +134,7 @@ function readTranslationConfig(raw: unknown): TranslationConfig {
     || typeof value.timeoutMs !== 'number' || value.timeoutMs < 1
     || value.autoTranslate !== undefined && typeof value.autoTranslate !== 'boolean'
   ) {
-    throw new Error(`[dsh-smooth-stream] malformed translation boot config: ${JSON.stringify(raw)}`)
+    throw new Error(`[dsh-think-box] malformed translation boot config: ${JSON.stringify(raw)}`)
   }
   return {
     backend: value.backend,
@@ -142,14 +142,14 @@ function readTranslationConfig(raw: unknown): TranslationConfig {
     model: value.model,
     reasoningEffort: typeof value.reasoningEffort === 'string' && value.reasoningEffort !== ''
       ? value.reasoningEffort
-      : DEFAULT_STREAM_CONFIG.translation.reasoningEffort,
+      : DEFAULT_THINK_BOX_CONFIG.translation.reasoningEffort,
     targetLanguage: value.targetLanguage,
     maxTextChars: value.maxTextChars,
     maxTokens: value.maxTokens,
     timeoutMs: value.timeoutMs,
     autoTranslate: typeof value.autoTranslate === 'boolean'
       ? value.autoTranslate
-      : DEFAULT_STREAM_CONFIG.translation.autoTranslate,
+      : DEFAULT_THINK_BOX_CONFIG.translation.autoTranslate,
   }
 }
 
@@ -162,17 +162,17 @@ function readTranslationConfig(raw: unknown): TranslationConfig {
  */
 class SettingsCell {
   private readonly listeners = new Set<() => void>()
-  private card: SmoothStreamCardController | undefined
-  private value: StreamSettings
+  private card: ThinkBoxCardController | undefined
+  private value: ThinkBoxSettings
   private pending = false
 
   /** @param initial - boot-time snapshot to render before the card resolves. */
-  constructor(initial: StreamSettings = DEFAULT_STREAM_SETTINGS) {
+  constructor(initial: ThinkBoxSettings = DEFAULT_THINK_BOX_SETTINGS) {
     this.value = initial
   }
 
   /** Re-point the cell at the plugin-owned settings controller. */
-  attach(card: SmoothStreamCardController): () => void {
+  attach(card: ThinkBoxCardController): () => void {
     this.card = card
     this.refresh()
     const unsubscribe = card.subscribe(() => { this.refresh() })
@@ -184,7 +184,7 @@ class SettingsCell {
     }
   }
 
-  private read(): StreamSettings {
+  private read(): ThinkBoxSettings {
     const snapshot = this.card?.getSnapshot()
     if (snapshot === undefined || snapshot.status !== 'ready') return this.value
     return this.card?.values() ?? this.value
@@ -218,7 +218,7 @@ class SettingsCell {
     return this.card?.getSnapshot().status === 'ready'
   }
 
-  readonly getSnapshot = (): StreamSettings => this.value
+  readonly getSnapshot = (): ThinkBoxSettings => this.value
 
   readonly subscribe = (listener: () => void): () => void => {
     this.listeners.add(listener)
@@ -261,7 +261,7 @@ export function apply(ctx: ClientContext): void {
   const config = readBootConfig()
   // First render uses the Host's resolved snapshot; the card RPC then supplies
   // live values and edits.
-  const settings = new SettingsCell(readSettingsSnapshot(config) ?? DEFAULT_STREAM_SETTINGS)
+  const settings = new SettingsCell(readSettingsSnapshot(config) ?? DEFAULT_THINK_BOX_SETTINGS)
   const translation = new TranslationRuntime(config.translation)
   let translationSettingsApi: TranslationSettingsApi | undefined
   const waitTranslationApi = async (): Promise<TranslationSettingsApi> => {
@@ -336,7 +336,7 @@ export function apply(ctx: ClientContext): void {
   keep(ctx.inject(['locale'], (localeCtx) => {
     localeCtx.effect(
       () => localeCtx.locale.register(CHAT_NS, { zh: chatZh, en: chatEn }),
-      'dsh-smooth-stream: conversation fallback dictionary',
+      'dsh-think-box: conversation fallback dictionary',
     )
     const conversationT = localeCtx.locale.bind('conversation')
     const chatT = localeCtx.locale.bind('chat') as (key: string, params?: Record<string, unknown>) => string
@@ -369,16 +369,16 @@ export function apply(ctx: ClientContext): void {
       },
       apply: (settings) => { translation.apply(settings) },
     }
-    const card = new SmoothStreamCardController(
+    const card = new ThinkBoxCardController(
       // The shared Context augmentation also carries the Host-side Connection
       // shape. This browser entry runs after the client provider installs its
       // handle, so narrow through unknown to its client contract here.
-      createSmoothStreamSettingsApi(settingsCtx.get('connection') as unknown as ConnectionHandle),
+      createThinkBoxSettingsApi(settingsCtx.get('connection') as unknown as ConnectionHandle),
       translationBridge,
     )
     const detachSettings = settings.attach(card)
     card.start()
-    settingsCtx.effect(() => settingsCtx.locale.register(SETTINGS_NS, { zh, en }), 'dsh-smooth-stream: settings dictionaries')
+    settingsCtx.effect(() => settingsCtx.locale.register(SETTINGS_NS, { zh, en }), 'dsh-think-box: settings dictionaries')
     // Configuration page, 0.2.1+: plugin configuration moved out of Settings
     // onto the sidebar Plugins page. A bundle registers `plugins.bundle.config`
     // keyed by its package name, and the page renders the entry between the
@@ -390,7 +390,7 @@ export function apply(ctx: ClientContext): void {
       key: '@local/dsh-think-box',
       locale: SETTINGS_NS,
       inject: () => card.inject(),
-    } as never, SmoothStreamConfigPage as never))
+    } as never, ThinkBoxConfigPage as never))
     return () => {
       card.stop()
       detachSettings()
@@ -398,7 +398,7 @@ export function apply(ctx: ClientContext): void {
   }))
 
 
-  const configured = function StreamConfiguredView(props: AssistantProps) {
+  const configured = function ThinkBoxConfiguredView(props: AssistantProps) {
     const preferences = useSyncExternalStore(
       settings.subscribe,
       settings.getSnapshot,
@@ -409,7 +409,7 @@ export function apply(ctx: ClientContext): void {
       translation.getSnapshot,
       translation.getSnapshot,
     )
-    return createElement(TypewriterAssistantNodeView, {
+    return createElement(ReasoningAssistantNodeView, {
       ...props,
       // Override the seat's single-namespace binding with the layered lookup
       // described above. Falls back to the seat's own binding only if the
@@ -444,7 +444,7 @@ export function apply(ctx: ClientContext): void {
       entry => entry.options.key === 'assistant-step'
         // The pinned SlotOptions type predates `registrant`; every current
         // runtime carries it (see the register spread in the slots package).
-        && (entry.options as { registrant?: string }).registrant !== 'dsh-smooth-stream'
+        && (entry.options as { registrant?: string }).registrant !== 'dsh-think-box'
         && entry.component !== configured,
     )
 
@@ -486,7 +486,7 @@ export function apply(ctx: ClientContext): void {
         // does not own. A namespace the composition does not declare would
         // degrade every `t()` call to its raw key.
         locale: 'conversation',
-        registrant: 'dsh-smooth-stream',
+        registrant: 'dsh-think-box',
       }, configured as never)
     }
 
@@ -539,5 +539,5 @@ export function apply(ctx: ClientContext): void {
 
   // Wind-down hook: a later instance clears the slot itself when it takes over,
   // so this only has to cover this instance being disposed on its own.
-  ctx.effect(() => releaseOwnership, 'dsh-smooth-stream: client apply ownership')
+  ctx.effect(() => releaseOwnership, 'dsh-think-box: client apply ownership')
 }

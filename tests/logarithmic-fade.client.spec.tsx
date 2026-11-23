@@ -2,13 +2,13 @@ import { act, cleanup, fireEvent, render } from '@testing-library/react'
 import { useRef } from 'react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { fadeTailSize, logarithmicOpacity, LogarithmicFadeController, useLogarithmicFade } from '../src/client/useLogarithmicFade.ts'
-import { TypewriterAssistantNodeView } from '../src/client/TypewriterAssistantNodeView.tsx'
+import { ReasoningAssistantNodeView } from '../src/client/ReasoningAssistantNodeView.tsx'
 import { FrameCoordinator } from '../src/client/FrameCoordinator.ts'
 import { chatZh } from '../src/client/locales.ts'
 import type { ReasoningTranslationFace } from '../src/client/reasoningTranslation.ts'
 
 /** Custom property the fade publishes its captured ink colour through. */
-const FADE_COLOR = '--dsh-smooth-stream-fade-color'
+const FADE_COLOR = '--dsh-think-box-fade-color'
 
 const registry = new Map<string, Set<Range>>()
 const controllers: LogarithmicFadeController[] = []
@@ -328,13 +328,13 @@ function assistantProps(blocks: unknown[], status = 'running', extra: Record<str
     fileMentions: () => undefined,
     t: (key: string) => (chatZh as Record<string, string>)[key] ?? key,
     ...extra,
-  } as unknown as Parameters<typeof TypewriterAssistantNodeView>[0]
+  } as unknown as Parameters<typeof ReasoningAssistantNodeView>[0]
 }
 
 const streamingReasoning = [{ kind: 'reasoning', text: '测试流式文字效果正在逐字出现。'.repeat(12) }]
 
 it('fades the live inline reasoning box and clears it when the block settles', async () => {
-  const view = render(<TypewriterAssistantNodeView {...assistantProps(streamingReasoning)} />)
+  const view = render(<ReasoningAssistantNodeView {...assistantProps(streamingReasoning)} />)
   for (let frame = 0; frame < 8; frame += 1) {
     tick(16)
     await flush()
@@ -342,14 +342,14 @@ it('fades the live inline reasoning box and clears it when the block settles', a
   expect(ranges().length).toBeGreaterThan(0)
   expect(ranges().every(range => !range.startContainer.parentElement?.closest('[aria-live]'))).toBe(true)
 
-  view.rerender(<TypewriterAssistantNodeView {...assistantProps(streamingReasoning, 'settled')} />)
+  view.rerender(<ReasoningAssistantNodeView {...assistantProps(streamingReasoning, 'settled')} />)
   await flush()
   tick(256)
   expect(ranges()).toHaveLength(0)
 })
 
 it('moves the fade to the opened reasoning body and back', async () => {
-  const view = render(<TypewriterAssistantNodeView {...assistantProps(streamingReasoning)} />)
+  const view = render(<ReasoningAssistantNodeView {...assistantProps(streamingReasoning)} />)
   tick(96)
   await flush()
   const row = view.container.querySelector('[data-disclosure-row]') as HTMLElement
@@ -378,10 +378,10 @@ it('does not replay the original when the translated feed replaces it, then fade
     translationLabel: 'test route',
     autoTranslate: true,
   })
-  const view = render(<TypewriterAssistantNodeView {...props} />)
+  const view = render(<ReasoningAssistantNodeView {...props} />)
   tick(64)
   await flush()
-  view.rerender(<TypewriterAssistantNodeView {...assistantProps([
+  view.rerender(<ReasoningAssistantNodeView {...assistantProps([
     { kind: 'reasoning', text: '第一段。\n第二段正在生成。' },
   ], 'running', {
     translation: face,
@@ -410,14 +410,14 @@ it('skips fade entirely under OS reduced motion', async () => {
     addEventListener: () => {},
     removeEventListener: () => {},
   }))
-  const view = render(<TypewriterAssistantNodeView {...assistantProps(streamingReasoning)} />)
+  const view = render(<ReasoningAssistantNodeView {...assistantProps(streamingReasoning)} />)
   await flush()
   expect(view.container.querySelector('[class*="scope"]')).toBeNull()
   expect(ranges()).toHaveLength(0)
 })
 
 it('does not fade restored, already settled reasoning', async () => {
-  render(<TypewriterAssistantNodeView {...assistantProps(streamingReasoning, 'settled')} />)
+  render(<ReasoningAssistantNodeView {...assistantProps(streamingReasoning, 'settled')} />)
   await flush()
   expect(ranges()).toHaveLength(0)
   expect(registry.size).toBe(0)

@@ -15,7 +15,7 @@
  */
 
 /** Global slot holding the current instance's stand-down callback. */
-export const APPLY_OWNER_GLOBAL = '__DSH_SMOOTH_STREAM_APPLY__'
+export const APPLY_OWNER_GLOBAL = '__DSH_THINK_BOX_APPLY__'
 
 /** Releases everything one `apply` instance installed. */
 export type StandDown = () => void
@@ -52,7 +52,7 @@ export function claimApplyOwnership(run: StandDown): StandDown {
       // A failed stand-down must not stop the new instance from taking over:
       // it is strictly better to have one live owner with leftovers than two
       // live owners fighting over the same scroller.
-      console.error('[dsh-smooth-stream] previous client instance failed to stand down', error)
+      console.error('[dsh-think-box] previous client instance failed to stand down', error)
     }
   }
   slot[APPLY_OWNER_GLOBAL] = run

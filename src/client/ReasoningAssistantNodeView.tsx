@@ -4,11 +4,11 @@ import { ImageGallery, type ImageLoader, type MessageImageLabels } from '@deepse
 import type { ChatNodeViewProps, TurnTailOwnerProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { AnimatedDisclosure } from './AnimatedDisclosure.tsx'
 import { IconThink } from './harnessIcons.ts'
-import { useSmoothStreamContent } from './useSmoothStreamContent.ts'
+import { useReasoningReveal } from './useReasoningReveal.ts'
 import { useLogarithmicFade } from './useLogarithmicFade.ts'
 import { useReasoningTranslation } from './useReasoningTranslation.ts'
 import type { ReasoningTranslationFace } from './reasoningTranslation.ts'
-import css from './TypewriterAssistantNodeView.module.css'
+import css from './ReasoningAssistantNodeView.module.css'
 
 type AssistantProps = ChatNodeViewProps<'assistant-step'>
 
@@ -289,7 +289,7 @@ function AnimatedReasoning({
   // The running鈫抐alse flip is the AUTO-close: it collapses instantly and the
   // follower's settle spring absorbs the height step. A later manual toggle
   // keeps the CSS glide.
-  const displayed = useSmoothStreamContent(sourceText, {
+  const displayed = useReasoningReveal(sourceText, {
     enabled: running && !reduced,
     speedCpsRef: fadeSpeedRef,
   })
@@ -627,7 +627,7 @@ function AnimatedReasoning({
  * here paces or scrolls the answer; only the reasoning box still owns its
  * own inline preview, character reveal, fade and settle flourish.
  */
-export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNodeView({
+export const ReasoningAssistantNodeView = memo(function ReasoningAssistantNodeView({
   thinkAutoExpand = true,
   node,
   groupPart,

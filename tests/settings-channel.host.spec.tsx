@@ -15,10 +15,10 @@ import * as DshSettings from '@deepseek-ai/dsh-settings'
 const { SettingsProvider } = DshSettings
 type SettingsNamespace = DshSettings.SettingsNamespace
 import { afterEach, describe, expect, it } from 'vitest'
-import type { StreamConfig, Volatile } from '../src/config.ts'
+import type { ThinkBoxConfig, Volatile } from '../src/config.ts'
 import { apply, Config } from '../src/plugin.ts'
-import { STREAM_SETTINGS_RPC, STREAM_SETTINGS_RPC_CHANNEL } from '../src/settings-api.ts'
-import { DEFAULT_STREAM_SETTINGS } from '../src/settings.ts'
+import { THINK_BOX_SETTINGS_RPC, THINK_BOX_SETTINGS_RPC_CHANNEL } from '../src/settings-api.ts'
+import { DEFAULT_THINK_BOX_SETTINGS } from '../src/settings.ts'
 import { TRANSLATION_RPC, TRANSLATION_RPC_CHANNEL } from '../src/translation-protocol.ts'
 
 /** Symbol the host Loader uses to commit a new volatile snapshot. */
@@ -40,7 +40,7 @@ function ref<T>(value: T): Volatile<T> {
  * @returns resolved plugin config.
  */
 function resolveConfig(): Config {
-  const withDefaults = Config({}) as unknown as StreamConfig
+  const withDefaults = Config({}) as unknown as ThinkBoxConfig
   return {
     ...withDefaults,
     enabled: ref(withDefaults.enabled),
@@ -158,15 +158,15 @@ async function call(
   return state
 }
 
-describe('smooth-stream settings channel fallback', () => {
+describe('think-box settings channel fallback', () => {
   it('mounts the channel directly when the connection service cannot, and serves the settings', async () => {
     const host = await mountHost(true)
     mounted.push(host.dispose)
 
-    const route = host.routes.find(candidate => candidate.path === STREAM_SETTINGS_RPC_CHANNEL)
-    expect(route).toMatchObject({ kind: 'prefix', path: STREAM_SETTINGS_RPC_CHANNEL })
+    const route = host.routes.find(candidate => candidate.path === THINK_BOX_SETTINGS_RPC_CHANNEL)
+    expect(route).toMatchObject({ kind: 'prefix', path: THINK_BOX_SETTINGS_RPC_CHANNEL })
 
-    const read = await call(route as WebRoute, STREAM_SETTINGS_RPC.read, {})
+    const read = await call(route as WebRoute, THINK_BOX_SETTINGS_RPC.read, {})
     expect(read.status).toBe(200)
     expect(JSON.parse(read.body)).toEqual({
       type: 'server-response',
@@ -175,13 +175,13 @@ describe('smooth-stream settings channel fallback', () => {
         ok: true,
         value: {
           writable: true,
-          enabled: DEFAULT_STREAM_SETTINGS.enabled,
-          thinkAutoExpand: DEFAULT_STREAM_SETTINGS.thinkAutoExpand,
+          enabled: DEFAULT_THINK_BOX_SETTINGS.enabled,
+          thinkAutoExpand: DEFAULT_THINK_BOX_SETTINGS.thinkAutoExpand,
         },
       },
     })
 
-    const write = await call(route as WebRoute, STREAM_SETTINGS_RPC.write, {
+    const write = await call(route as WebRoute, THINK_BOX_SETTINGS_RPC.write, {
       enabled: false,
       thinkAutoExpand: true,
     })
@@ -198,21 +198,21 @@ describe('smooth-stream settings channel fallback', () => {
   it('keeps the connection request fence and the router rules on the direct route', async () => {
     const host = await mountHost(true)
     mounted.push(host.dispose)
-    const route = host.routes.find(candidate => candidate.path === STREAM_SETTINGS_RPC_CHANNEL) as WebRoute
+    const route = host.routes.find(candidate => candidate.path === THINK_BOX_SETTINGS_RPC_CHANNEL) as WebRoute
 
-    const anonymous = await call(route, STREAM_SETTINGS_RPC.read, {}, { headers: { 'content-type': 'application/json' } })
+    const anonymous = await call(route, THINK_BOX_SETTINGS_RPC.read, {}, { headers: { 'content-type': 'application/json' } })
     expect(anonymous).toEqual({ status: 401, body: 'unauthorized' })
 
-    const wrongMethod = await call(route, STREAM_SETTINGS_RPC.read, {}, { method: 'GET' })
+    const wrongMethod = await call(route, THINK_BOX_SETTINGS_RPC.read, {}, { method: 'GET' })
     expect(wrongMethod.status).toBe(404)
 
-    const wrongType = await call(route, STREAM_SETTINGS_RPC.read, {}, { headers: { 'content-type': 'text/plain', cookie: 'dsh=browser' } })
+    const wrongType = await call(route, THINK_BOX_SETTINGS_RPC.read, {}, { headers: { 'content-type': 'text/plain', cookie: 'dsh=browser' } })
     expect(wrongType.status).toBe(415)
 
-    const notJson = await call(route, STREAM_SETTINGS_RPC.read, {}, { body: 'not json' })
+    const notJson = await call(route, THINK_BOX_SETTINGS_RPC.read, {}, { body: 'not json' })
     expect(notJson.status).toBe(400)
 
-    const mismatched = await call(route, STREAM_SETTINGS_RPC.read, {}, {
+    const mismatched = await call(route, THINK_BOX_SETTINGS_RPC.read, {}, {
       body: JSON.stringify({ type: 'client-request', rpcId: 'probe-2', method: 'settings.write', payload: {} }),
     })
     expect(JSON.parse(mismatched.body)).toMatchObject({
@@ -220,7 +220,7 @@ describe('smooth-stream settings channel fallback', () => {
       result: { ok: false, error: { code: 'gateway/bad-request' } },
     })
 
-    const malformed = await call(route, STREAM_SETTINGS_RPC.read, {}, { body: JSON.stringify({ rpcId: 7 }) })
+    const malformed = await call(route, THINK_BOX_SETTINGS_RPC.read, {}, { body: JSON.stringify({ rpcId: 7 }) })
     expect(JSON.parse(malformed.body)).toMatchObject({
       rpcId: 'invalid-request',
       result: { ok: false, error: { code: 'gateway/bad-request' } },
@@ -230,7 +230,7 @@ describe('smooth-stream settings channel fallback', () => {
   it('rejects the removed debug and upgrade endpoints as unknown', async () => {
     const host = await mountHost(true)
     mounted.push(host.dispose)
-    const route = host.routes.find(candidate => candidate.path === STREAM_SETTINGS_RPC_CHANNEL) as WebRoute
+    const route = host.routes.find(candidate => candidate.path === THINK_BOX_SETTINGS_RPC_CHANNEL) as WebRoute
     for (const endpoint of ['debug.read', 'debug.write', 'plugin.upgrade']) {
       const reply = await call(route, endpoint, {})
       expect(JSON.parse(reply.body)).toMatchObject({

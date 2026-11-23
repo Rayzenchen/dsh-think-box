@@ -1,11 +1,11 @@
-/** Browser adapter for the Host-owned smooth-stream settings RPC. */
+/** Browser adapter for the Host-owned think-box settings RPC. */
 
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
-import type { StreamSettings } from '../settings.ts'
+import type { ThinkBoxSettings } from '../settings.ts'
 import {
-  STREAM_SETTINGS_RPC,
-  STREAM_SETTINGS_RPC_CHANNEL,
-  type StreamSettingsView,
+  THINK_BOX_SETTINGS_RPC,
+  THINK_BOX_SETTINGS_RPC_CHANNEL,
+  type ThinkBoxSettingsView,
 } from '../settings-api.ts'
 
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -14,13 +14,13 @@ function record(value: unknown): Record<string, unknown> | undefined {
     : undefined
 }
 
-function settingsView(value: unknown): StreamSettingsView {
+function settingsView(value: unknown): ThinkBoxSettingsView {
   const data = record(value)
   if (data === undefined
     || typeof data.writable !== 'boolean'
     || typeof data.enabled !== 'boolean'
     || typeof data.thinkAutoExpand !== 'boolean') {
-    throw new Error('dsh-smooth-stream: malformed settings response')
+    throw new Error('dsh-think-box: malformed settings response')
   }
   return {
     writable: data.writable,
@@ -35,21 +35,21 @@ function accepted(result: Awaited<ReturnType<ConnectionHandle['rpc']['call']>>):
 }
 
 /** Narrow client contract consumed by the staged settings-card controller. */
-export interface SmoothStreamSettingsApi {
-  read(): Promise<StreamSettingsView>
-  write(settings: StreamSettings): Promise<StreamSettingsView>
+export interface ThinkBoxSettingsApi {
+  read(): Promise<ThinkBoxSettingsView>
+  write(settings: ThinkBoxSettings): Promise<ThinkBoxSettingsView>
 }
 
 /** Build the typed facade over the generic Connection RPC service. */
-export function createSmoothStreamSettingsApi(connection: ConnectionHandle): SmoothStreamSettingsApi {
+export function createThinkBoxSettingsApi(connection: ConnectionHandle): ThinkBoxSettingsApi {
   return {
-    async read(): Promise<StreamSettingsView> {
-      return settingsView(accepted(await connection.rpc.call(STREAM_SETTINGS_RPC_CHANNEL, STREAM_SETTINGS_RPC.read, {})))
+    async read(): Promise<ThinkBoxSettingsView> {
+      return settingsView(accepted(await connection.rpc.call(THINK_BOX_SETTINGS_RPC_CHANNEL, THINK_BOX_SETTINGS_RPC.read, {})))
     },
-    async write(settings: StreamSettings): Promise<StreamSettingsView> {
+    async write(settings: ThinkBoxSettings): Promise<ThinkBoxSettingsView> {
       return settingsView(accepted(await connection.rpc.call(
-        STREAM_SETTINGS_RPC_CHANNEL,
-        STREAM_SETTINGS_RPC.write,
+        THINK_BOX_SETTINGS_RPC_CHANNEL,
+        THINK_BOX_SETTINGS_RPC.write,
         { enabled: settings.enabled, thinkAutoExpand: settings.thinkAutoExpand },
       )))
     },

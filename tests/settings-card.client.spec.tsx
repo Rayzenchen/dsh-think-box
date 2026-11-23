@@ -7,13 +7,13 @@ import { SlotRegistry } from '@deepseek-ai/dsh-client-runtime/client'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { apply, inject } from '../src/client/index.ts'
-import { SmoothStreamCard, type SmoothStreamCardProps } from '../src/client/SmoothStreamCard.tsx'
-import type { SmoothStreamCardFace } from '../src/client/smooth-stream-card-controller.ts'
+import { ThinkBoxCard, type ThinkBoxCardProps } from '../src/client/ThinkBoxCard.tsx'
+import type { ThinkBoxCardFace } from '../src/client/think-box-card-controller.ts'
 import { en } from '../src/client/locales.ts'
 import {
-  STREAM_SETTINGS_RPC,
-  STREAM_SETTINGS_RPC_CHANNEL,
-  type StreamSettingsView,
+  THINK_BOX_SETTINGS_RPC,
+  THINK_BOX_SETTINGS_RPC_CHANNEL,
+  type ThinkBoxSettingsView,
 } from '../src/settings-api.ts'
 import { TRANSLATION_RPC, TRANSLATION_RPC_CHANNEL } from '../src/translation-protocol.ts'
 import { DEFAULT_TRANSLATION_CONFIG, type TranslationConfig } from '../src/config.ts'
@@ -23,14 +23,14 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-const readyView: StreamSettingsView = {
+const readyView: ThinkBoxSettingsView = {
   writable: true,
   enabled: true,
   thinkAutoExpand: true,
 }
 
 interface BenchOptions {
-  view?: StreamSettingsView
+  view?: ThinkBoxSettingsView
   readValue?: unknown
   failRead?: boolean
   readGate?: Promise<void>
@@ -51,8 +51,8 @@ async function bench(options: BenchOptions = {}): Promise<{
   ctx: Context
   slots: SlotRegistry
   call: ReturnType<typeof vi.fn>
-  view: () => StreamSettingsView
-  setView: (next: StreamSettingsView) => void
+  view: () => ThinkBoxSettingsView
+  setView: (next: ThinkBoxSettingsView) => void
   removeConnection: () => void
 }> {
   const ctx = new Context()
@@ -67,13 +67,13 @@ async function bench(options: BenchOptions = {}): Promise<{
     ...options.translation,
   }
   const call = vi.fn(async (channel: string, endpoint: string, payload: unknown) => {
-    if (channel === STREAM_SETTINGS_RPC_CHANNEL) {
-      if (endpoint === STREAM_SETTINGS_RPC.read) {
+    if (channel === THINK_BOX_SETTINGS_RPC_CHANNEL) {
+      if (endpoint === THINK_BOX_SETTINGS_RPC.read) {
         if (options.failRead === true) throw new Error('RPC unavailable')
         await options.readGate
         return { ok: true as const, value: options.readValue ?? view }
       }
-      if (endpoint === STREAM_SETTINGS_RPC.write) {
+      if (endpoint === THINK_BOX_SETTINGS_RPC.write) {
         const settings = payload as { enabled?: unknown, thinkAutoExpand?: unknown }
         if (typeof settings.enabled !== 'boolean' || typeof settings.thinkAutoExpand !== 'boolean') {
           return { ok: false as const, error: { code: 'internal', message: 'bad payload' } }
@@ -120,26 +120,26 @@ function declareCardSlot(slots: SlotRegistry): () => void {
   } as never, () => null)
 }
 
-function cardFace(slots: SlotRegistry): SmoothStreamCardFace {
+function cardFace(slots: SlotRegistry): ThinkBoxCardFace {
   const entry = slots.entries('plugins.bundle.config' as never)
     .find(item => item.options.key === '@local/dsh-think-box')
   if (entry === undefined) throw new Error('settings card was not registered')
-  return (entry.inject as unknown as () => SmoothStreamCardFace)()
+  return (entry.inject as unknown as () => ThinkBoxCardFace)()
 }
 
 const cardTitle = new RegExp(en.title, 'i')
 
-function cardProps(face: SmoothStreamCardFace): SmoothStreamCardProps {
+function cardProps(face: ThinkBoxCardFace): ThinkBoxCardProps {
   return {
     ...face,
     t: (key: keyof typeof en) => en[key],
     // The real slot helpers are React hook adapters; mirror them with
     // useSyncExternalStore so edits re-render the card.
-    useSmoothStreamCard: (selector: (state: ReturnType<typeof face.hooks.smoothStreamCard.getSnapshot>) => unknown) => (
+    useThinkBoxCard: (selector: (state: ReturnType<typeof face.hooks.thinkBoxCard.getSnapshot>) => unknown) => (
       selector(useSyncExternalStore(
-        face.hooks.smoothStreamCard.subscribe,
-        face.hooks.smoothStreamCard.getSnapshot,
-        face.hooks.smoothStreamCard.getSnapshot,
+        face.hooks.thinkBoxCard.subscribe,
+        face.hooks.thinkBoxCard.getSnapshot,
+        face.hooks.thinkBoxCard.getSnapshot,
       ))
     ),
     useTranslationCard: (selector: (state: ReturnType<typeof face.hooks.translationCard.getSnapshot>) => unknown) => (
@@ -149,12 +149,12 @@ function cardProps(face: SmoothStreamCardFace): SmoothStreamCardProps {
         face.hooks.translationCard.getSnapshot,
       ))
     ),
-  } as unknown as SmoothStreamCardProps
+  } as unknown as ThinkBoxCardProps
 }
 
 async function renderCard(options: BenchOptions = {}): Promise<{
-  face: SmoothStreamCardFace
-  view: () => StreamSettingsView
+  face: ThinkBoxCardFace
+  view: () => ThinkBoxSettingsView
   screen: ReturnType<typeof render>
   bench: Awaited<ReturnType<typeof bench>>
 }> {
@@ -163,9 +163,9 @@ async function renderCard(options: BenchOptions = {}): Promise<{
   const fiber = harness.ctx.plugin({ inject: [...inject], apply })
   await fiber.await()
   const face = cardFace(harness.slots)
-  await waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot().status)
+  await waitFor(() => expect(face.hooks.thinkBoxCard.getSnapshot().status)
     .toBe(options.failRead === true ? 'unavailable' : 'ready'))
-  const view = render(<SmoothStreamCard {...cardProps(face)} />)
+  const view = render(<ThinkBoxCard {...cardProps(face)} />)
   fireEvent.click(view.getByRole('button', { name: cardTitle }))
   return { face, view: harness.view, screen: view, bench: harness }
 }
@@ -186,23 +186,23 @@ describe('reasoning settings card', () => {
     const { face, screen, bench } = await renderCard()
     const enable = screen.getByRole('checkbox', { name: new RegExp(en.enabled) }) as HTMLInputElement
     fireEvent.click(enable)
-    expect(face.hooks.smoothStreamCard.getSnapshot().enabled).toBe(false)
+    expect(face.hooks.thinkBoxCard.getSnapshot().enabled).toBe(false)
     // The first Save belongs to the base preferences; the translation channel
     // renders its own Save after it.
     fireEvent.click(screen.getAllByRole('button', { name: en.save })[0] as HTMLElement)
     await waitFor(() => expect(bench.call).toHaveBeenCalledWith(
-      STREAM_SETTINGS_RPC_CHANNEL,
-      STREAM_SETTINGS_RPC.write,
+      THINK_BOX_SETTINGS_RPC_CHANNEL,
+      THINK_BOX_SETTINGS_RPC.write,
       { enabled: false, thinkAutoExpand: true },
     ))
-    await waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot().dirty).toBe(false))
+    await waitFor(() => expect(face.hooks.thinkBoxCard.getSnapshot().dirty).toBe(false))
   })
 
   it('disables auto-follow while the master switch is off', async () => {
     const { face, screen } = await renderCard({ view: { ...readyView, enabled: false } })
     const follow = screen.getByRole('checkbox', { name: new RegExp(en.thinkAutoExpand) }) as HTMLInputElement
     expect(follow.disabled).toBe(true)
-    expect(face.hooks.smoothStreamCard.getSnapshot().thinkAutoExpand).toBe(true)
+    expect(face.hooks.thinkBoxCard.getSnapshot().thinkAutoExpand).toBe(true)
   })
 
   it('reports a read-only deployment and blocks edits', async () => {
@@ -213,21 +213,21 @@ describe('reasoning settings card', () => {
 
   it('shows an unavailable card and retries the read', async () => {
     const { face, screen, bench } = await renderCard({ failRead: true })
-    expect(face.hooks.smoothStreamCard.getSnapshot().status).toBe('unavailable')
+    expect(face.hooks.thinkBoxCard.getSnapshot().status).toBe('unavailable')
     expect(screen.getByText(en.unavailable)).toBeTruthy()
     bench.call.mockClear()
     fireEvent.click(screen.getByRole('button', { name: en.retry }))
     // The read is retried; this fake still fails it, so the card stays in its
     // unavailable state rather than pretending the deployment recovered.
-    await waitFor(() => expect(bench.call).toHaveBeenCalledWith(STREAM_SETTINGS_RPC_CHANNEL, STREAM_SETTINGS_RPC.read, {}))
+    await waitFor(() => expect(bench.call).toHaveBeenCalledWith(THINK_BOX_SETTINGS_RPC_CHANNEL, THINK_BOX_SETTINGS_RPC.read, {}))
   })
 
   it('keeps the staged value and reports a failed save', async () => {
     const { face, screen } = await renderCard({ failWrite: true })
     fireEvent.click(screen.getByRole('checkbox', { name: new RegExp(en.enabled) }))
     fireEvent.click(screen.getAllByRole('button', { name: en.save })[0] as HTMLElement)
-    await waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot().failed).toBe(true))
-    expect(face.hooks.smoothStreamCard.getSnapshot().enabled).toBe(false)
+    await waitFor(() => expect(face.hooks.thinkBoxCard.getSnapshot().failed).toBe(true))
+    expect(face.hooks.thinkBoxCard.getSnapshot().enabled).toBe(false)
     expect(screen.getByText(en.saveFailed)).toBeTruthy()
   })
 

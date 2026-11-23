@@ -34,7 +34,7 @@ vi.mock('@deepseek-ai/dsh-client-ui-attachment', () => ({
   ImageGallery: () => null,
 }))
 
-import { TypewriterAssistantNodeView } from '../src/client/TypewriterAssistantNodeView.tsx'
+import { ReasoningAssistantNodeView } from '../src/client/ReasoningAssistantNodeView.tsx'
 import {
   planTranslationFragments,
   type ReasoningTranslationFace,
@@ -73,7 +73,7 @@ function t(key: string): string {
 function assistantProps(
   blocks: unknown[],
   status: 'settled' | 'running' = 'settled',
-): Parameters<typeof TypewriterAssistantNodeView>[0] {
+): Parameters<typeof ReasoningAssistantNodeView>[0] {
   return {
     node: {
       kind: 'assistant-step',
@@ -85,7 +85,7 @@ function assistantProps(
     fileMentions: () => undefined,
     sessionId: 'session-translation',
     t,
-  } as unknown as Parameters<typeof TypewriterAssistantNodeView>[0]
+  } as unknown as Parameters<typeof ReasoningAssistantNodeView>[0]
 }
 
 /** Deterministic translation Remote stand-in. */
@@ -141,7 +141,7 @@ describe('planTranslationFragments', () => {
 describe('reasoning translation integration', () => {
   it('shows the translated feed after the toggle is clicked and switches back to the original', async () => {
     const translation = face()
-    const view = render(<TypewriterAssistantNodeView
+    const view = render(<ReasoningAssistantNodeView
       {...assistantProps([{ kind: 'reasoning', text: 'first line\nsecond line' }])}
       translation={translation}
     />)
@@ -168,7 +168,7 @@ describe('reasoning translation integration', () => {
         void source
       }),
     })
-    const view = render(<TypewriterAssistantNodeView
+    const view = render(<ReasoningAssistantNodeView
       {...assistantProps([{ kind: 'reasoning', text: 'line one\n\nline two\n' }])}
       translation={translation}
     />)
@@ -189,7 +189,7 @@ describe('reasoning translation integration', () => {
   it('does not start a translation until the reader opts in', async () => {
     const prepare = vi.fn(async () => PLAN)
     const translate = vi.fn(async (source: string) => `译:${source}`)
-    const view = render(<TypewriterAssistantNodeView
+    const view = render(<ReasoningAssistantNodeView
       {...assistantProps([{ kind: 'reasoning', text: 'first line\nsecond line' }])}
       translation={face({ prepare, translate })}
     />)
@@ -210,7 +210,7 @@ describe('reasoning translation integration', () => {
         return `译:${source}`
       },
     })
-    const view = render(<TypewriterAssistantNodeView
+    const view = render(<ReasoningAssistantNodeView
       {...assistantProps([{ kind: 'reasoning', text: 'first line\nsecond line' }])}
       translation={translation}
     />)
@@ -228,7 +228,7 @@ describe('reasoning translation integration', () => {
   })
 
   it('translates a live reasoning block automatically when autoTranslate is on', async () => {
-    const view = render(<TypewriterAssistantNodeView
+    const view = render(<ReasoningAssistantNodeView
       {...assistantProps([{ kind: 'reasoning', text: 'first line\nsecond line' }], 'running')}
       translation={face()}
       autoTranslate
@@ -237,7 +237,7 @@ describe('reasoning translation integration', () => {
   })
 
   it('hides the toggle when the translation bundle is not mounted', () => {
-    const view = render(<TypewriterAssistantNodeView
+    const view = render(<ReasoningAssistantNodeView
       {...assistantProps([{ kind: 'reasoning', text: 'first line' }])}
     />)
     expect(view.queryByRole('button', { name: '查看译文' })).toBeNull()

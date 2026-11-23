@@ -1,7 +1,7 @@
-/** Locale bundles for the smooth-stream plugin configuration card. */
+/** Locale bundles for the think-box plugin configuration card. */
 
 /** Dictionary namespace owned by this plugin's settings card. */
-export const NS = 'settings.smoothStream'
+export const NS = 'settings.thinkBox'
 
 /**
  * Namespace owning the conversation keys THIS PLUGIN must be able to render
@@ -23,14 +23,14 @@ export const NS = 'settings.smoothStream'
  * `LocaleRuntime.register` throws when the (namespace, locale) pair already
  * has an owner, and the Harness owns both.
  */
-export const CHAT_NS = 'smoothStream.chat'
+export const CHAT_NS = 'thinkBox.chat'
 
 /**
  * Keys the plugin resolves through {@link CHAT_NS}. Only keys with no
  * dependable Harness owner belong here; anything the Harness already provides
  * must keep coming from the Harness so a language pack can override it.
  */
-export type SmoothStreamChatKey = 'message.think' | 'image.serviceUnavailable'
+export type ThinkBoxChatKey = 'message.think' | 'image.serviceUnavailable'
   /** Reasoning-translation toggle: switch the think box to the translated feed. */
   | 'message.think.translate'
   /** Reasoning-translation toggle: switch back to the original reasoning. */
@@ -42,8 +42,8 @@ export type SmoothStreamChatKey = 'message.think' | 'image.serviceUnavailable'
   /** Retry action after a translation failure. */
   | 'message.think.translateRetry'
 
-/** English fallback for {@link SmoothStreamChatKey}. */
-export const chatEn: Record<SmoothStreamChatKey, string> = {
+/** English fallback for {@link ThinkBoxChatKey}. */
+export const chatEn: Record<ThinkBoxChatKey, string> = {
   'message.think': 'Think',
   // Removed from the Harness dictionaries in 0.1.5 (rc.6 had it under
   // `conversation`), and the plugin interpolates it into a thrown Error, so
@@ -56,8 +56,8 @@ export const chatEn: Record<SmoothStreamChatKey, string> = {
   'message.think.translateRetry': 'Retry',
 }
 
-/** Simplified Chinese fallback for {@link SmoothStreamChatKey}. */
-export const chatZh: Record<SmoothStreamChatKey, string> = {
+/** Simplified Chinese fallback for {@link ThinkBoxChatKey}. */
+export const chatZh: Record<ThinkBoxChatKey, string> = {
   'message.think': '思考',
   'image.serviceUnavailable': '图片服务不可用',
   'message.think.translate': '查看译文',
@@ -68,7 +68,7 @@ export const chatZh: Record<SmoothStreamChatKey, string> = {
 }
 
 /** Locale keys the card renders. */
-export type SmoothStreamLocaleKey =
+export type ThinkBoxLocaleKey =
   | 'title' | 'description'
   | 'enabled' | 'enabledHint'
   | 'thinkAutoExpand' | 'thinkAutoExpandHint'
@@ -83,7 +83,7 @@ export type SmoothStreamLocaleKey =
   | 'translationAutoTranslate' | 'translationAutoTranslateHint' | 'translationSaveFailed'
 
 /** English copy. */
-export const en: Record<SmoothStreamLocaleKey, string> = {
+export const en: Record<ThinkBoxLocaleKey, string> = {
   title: 'Reasoning display enhancement',
   description: 'The inline reasoning box beside the Think row. Answer text is rendered by Harness itself.',
   enabled: 'Enable the reasoning box',
@@ -123,7 +123,7 @@ export const en: Record<SmoothStreamLocaleKey, string> = {
 }
 
 /** Simplified Chinese copy. */
-export const zh: Record<SmoothStreamLocaleKey, string> = {
+export const zh: Record<ThinkBoxLocaleKey, string> = {
   title: '思维链显示增强',
   description: '「思考」行右侧的行内推理窗。正文由 Harness 自身渲染，不再逐字输出。',
   enabled: '启用思考框',
@@ -164,7 +164,7 @@ export const zh: Record<SmoothStreamLocaleKey, string> = {
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
-    'settings.smoothStream': SmoothStreamLocaleKey
-    'smoothStream.chat': SmoothStreamChatKey
+    'settings.thinkBox': ThinkBoxLocaleKey
+    'thinkBox.chat': ThinkBoxChatKey
   }
 }

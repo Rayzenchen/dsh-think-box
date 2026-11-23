@@ -7,10 +7,10 @@
  */
 
 /** Settings namespace kept for the card's legacy registration helpers. */
-export const STREAM_SETTINGS_NS = 'smooth-stream'
+export const THINK_BOX_SETTINGS_NS = 'think-box'
 
 /** Preferences a user may set. */
-export interface StreamSettings {
+export interface ThinkBoxSettings {
   /** Whether this plugin takes over the assistant row for the reasoning box. */
   enabled: boolean
   /** Whether the inline reasoning box follows its own stream while collapsed. */
@@ -18,7 +18,7 @@ export interface StreamSettings {
 }
 
 /** Defaults shared by the Host schema and the client-side fallback. */
-export const DEFAULT_STREAM_SETTINGS: StreamSettings = {
+export const DEFAULT_THINK_BOX_SETTINGS: ThinkBoxSettings = {
   enabled: true,
   thinkAutoExpand: true,
 }

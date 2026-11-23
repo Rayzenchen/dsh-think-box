@@ -54,7 +54,7 @@ describe('claimApplyOwnership', () => {
 
       expect(slot()[APPLY_OWNER_GLOBAL]).toBe(standDown)
       expect(logged).toHaveBeenCalledWith(
-        '[dsh-smooth-stream] previous client instance failed to stand down',
+        '[dsh-think-box] previous client instance failed to stand down',
         expect.any(Error),
       )
     } finally {

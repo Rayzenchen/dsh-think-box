@@ -73,18 +73,6 @@
   line-height: 1.5;
   color: var(--dsw-alias-label-tertiary);
 }
-
-.version {
-  flex: none;
-  max-width: 16rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--dsw-alias-label-tertiary);
-}
-
 .pending {
   flex: none;
   padding: 1px 8px;
@@ -168,41 +156,6 @@
   outline: 2px solid var(--dsw-alias-brand-primary);
   outline-offset: 2px;
 }
-
-.choiceRow {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 14px;
-  margin: 2px 0 0;
-  padding: 0;
-}
-
-.choice {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--dsw-alias-label-secondary);
-  cursor: pointer;
-}
-
-.choiceInput {
-  width: 14px;
-  height: 14px;
-  accent-color: var(--dsw-alias-brand-primary);
-  cursor: pointer;
-}
-
-.choice:has(.choiceInput:disabled) {
-  cursor: default;
-  opacity: 0.55;
-}
-
-.choiceInput:disabled {
-  cursor: default;
-}
-
 .hint {
   margin: 0;
   font-size: 12px;
@@ -217,23 +170,6 @@
   gap: 12px;
   padding: 12px 0;
 }
-
-.updateRow {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 0;
-  border-top: 1px solid var(--dsw-alias-border-l2);
-}
-
-.updateCopy {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  gap: 4px;
-}
-
 .footer {
   display: flex;
   align-items: center;
@@ -253,8 +189,7 @@
 }
 
 .save,
-.discard,
-.update {
+.discard {
   appearance: none;
   border: 1px solid transparent;
   border-radius: 8px;
@@ -276,86 +211,20 @@
   color: var(--dsw-alias-label-secondary);
 }
 
-.discard:hover:not(:disabled),
-.update:hover:not(:disabled) {
+.discard:hover:not(:disabled) {
   border-color: var(--dsw-alias-label-dimmed);
   color: var(--dsw-alias-label-primary);
 }
-
-.update {
-  display: inline-flex;
-  align-items: center;
-  flex: none;
-  gap: 6px;
-  border-color: var(--dsw-alias-border-l2);
-  background: none;
-  color: var(--dsw-alias-label-secondary);
-}
-
 .discard:disabled,
-.save:disabled,
-.update:disabled {
+.save:disabled {
   opacity: 0.4;
   cursor: default;
 }
 
 .discard:focus-visible,
-.save:focus-visible,
-.update:focus-visible {
+.save:focus-visible {
   outline: 2px solid var(--dsw-alias-brand-primary);
   outline-offset: 1px;
-}
-
-/*
- * Reasoning-box appearance section. It is deliberately not a `.field`: those
- * rows mirror Host-managed settings and go disabled when the Host serves the
- * card read-only, while these controls own their own storage and always work.
- */
-.appearance {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 12px 0;
-  border-top: 1px solid var(--dsw-alias-border-l2);
-}
-
-.slider {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.sliderHead {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.sliderValue {
-  flex: none;
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  line-height: 1.5;
-  color: var(--dsw-alias-label-secondary);
-}
-
-.range {
-  width: 100%;
-  height: 18px;
-  margin: 0;
-  accent-color: var(--dsw-alias-label-primary);
-  cursor: pointer;
-}
-
-/* Standalone framing for the same section when a slot mounts it on its own
- * (the plugin-manager bundle page) instead of inside the settings card. */
-.appearanceCard {
-  padding: 0 2px;
-}
-
-.appearanceCard .appearance {
-  border-top: none;
 }
 
 /* Runtime translation channel form. It writes the plugin-owned store over its

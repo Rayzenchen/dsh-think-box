@@ -15,9 +15,9 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 /** Kept as a named type for callers; the fork ships only the balanced cadence. */
-export type StreamSmoothingPreset = 'balanced'
+export type ReasoningRevealPreset = 'balanced'
 
-export interface StreamSmoothingPresetConfig {
+export interface ReasoningRevealPresetConfig {
   readonly activeInputWindowMs: number
   readonly defaultCps: number
   readonly emaAlpha: number
@@ -33,7 +33,7 @@ export interface StreamSmoothingPresetConfig {
   readonly targetBufferMs: number
 }
 
-export const PRESET_CONFIG: Record<StreamSmoothingPreset, StreamSmoothingPresetConfig> = {
+export const PRESET_CONFIG: Record<ReasoningRevealPreset, ReasoningRevealPresetConfig> = {
   balanced: {
     activeInputWindowMs: 220,
     defaultCps: 80,
@@ -126,7 +126,7 @@ export interface SettleDrainInput {
 }
 
 /** Pure settle-drain decision shared by the frame loop and its tests. */
-export function computeSettleDrain(config: StreamSmoothingPresetConfig, input: SettleDrainInput): number {
+export function computeSettleDrain(config: ReasoningRevealPresetConfig, input: SettleDrainInput): number {
   if (input.inputActive || !input.settling) return 0
   // A settled stream must drain fast enough to finish the reply promptly:
   // lag beyond the ceiling drains within the second ceiling.
@@ -142,7 +142,7 @@ export function computeSettleDrain(config: StreamSmoothingPresetConfig, input: S
  * This completion-only target may exceed the live-stream flush ceiling.
  */
 export function computeCompletionDrain(
-  config: StreamSmoothingPresetConfig,
+  config: ReasoningRevealPresetConfig,
   backlog: number,
   initialCps = 0,
 ): number {
@@ -186,7 +186,7 @@ export interface RevealStepResult {
 }
 
 /** Pure per-frame reveal decision shared by the loop and its tests. */
-export function computeRevealStep(config: StreamSmoothingPresetConfig, input: RevealStepInput, dtSeconds: number): RevealStepResult {
+export function computeRevealStep(config: ReasoningRevealPresetConfig, input: RevealStepInput, dtSeconds: number): RevealStepResult {
   // Track the faster of the two EMAs and do not clamp to the old low maxCps
   // ceiling — that cap is why a fast model left hundreds of chars unrevealed.
   const trackedCps = Math.max(input.emaCps, input.arrivalCpsEma)
@@ -219,7 +219,7 @@ export function computeRevealStep(config: StreamSmoothingPresetConfig, input: Re
   return { revealChars: Math.max(minRevealChars, Math.round(currentCps * dtSeconds)), targetLagChars }
 }
 
-export interface UseSmoothStreamContentOptions {
+export interface UseReasoningRevealOptions {
   enabled?: boolean
   /** The producer has completed; drain queued text without live backpressure. */
   inputComplete?: boolean
@@ -256,7 +256,7 @@ export interface UseSmoothStreamContentOptions {
  * @param options - Steady-rate wiring.
  * @returns The displayed content, revealed at the balanced cadence.
  */
-export function useSmoothStreamContent(
+export function useReasoningReveal(
   content: string,
   {
     enabled = true,
@@ -267,7 +267,7 @@ export function useSmoothStreamContent(
     revealedCharsRef,
     revealScaleRef,
     onRevealCommit,
-  }: UseSmoothStreamContentOptions = {},
+  }: UseReasoningRevealOptions = {},
 ): string {
   const config = PRESET_CONFIG.balanced
   const seedCps = defaultCps ?? config.defaultCps

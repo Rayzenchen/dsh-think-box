@@ -1,5 +1,5 @@
 /**
- * The smooth-stream plugin configuration card. Preferences are staged until
+ * The think-box plugin configuration card. Preferences are staged until
  * the user saves: the total switch and the inline reasoning box's auto-follow.
  * Translation settings live in their own channel below them.
  */
@@ -7,25 +7,25 @@
 import { useState } from 'react'
 import type { InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import { IconChevronDown } from './harnessIcons.ts'
-import type { SmoothStreamCardFace, TranslationCardState } from './smooth-stream-card-controller.ts'
+import type { ThinkBoxCardFace, TranslationCardState } from './think-box-card-controller.ts'
 import type { TranslationConfig } from '../config.ts'
-import type { SmoothStreamLocaleKey } from './locales.ts'
-import css from './SmoothStreamCard.module.css'
+import type { ThinkBoxLocaleKey } from './locales.ts'
+import css from './ThinkBoxCard.module.css'
 
 /**
- * Props the renderer binds for the smooth-stream card: the locale dictionary
+ * Props the renderer binds for the think-box card: the locale dictionary
  * plus the face injected by the controller. Deliberately free of per-slot
  * types — the pinned type packages cannot describe the Plugins-page slot.
  */
-export type SmoothStreamCardProps =
-  PropsLocale<'settings.smoothStream'>
-  & InjectFace<SmoothStreamCardFace>
+export type ThinkBoxCardProps =
+  PropsLocale<'settings.thinkBox'>
+  & InjectFace<ThinkBoxCardFace>
 
-/** Render the smooth-stream card independently of the core settings namespace allowlist. */
-export function SmoothStreamCard(props: SmoothStreamCardProps) {
+/** Render the think-box card independently of the core settings namespace allowlist. */
+export function ThinkBoxCard(props: ThinkBoxCardProps) {
   const { t } = props
   const [open, setOpen] = useState(false)
-  const state = props.useSmoothStreamCard(snapshot => snapshot)
+  const state = props.useThinkBoxCard(snapshot => snapshot)
   const translation = props.useTranslationCard(snapshot => snapshot)
   const blocked = !state.dirty || state.saving || state.status !== 'ready'
 
@@ -120,12 +120,12 @@ export function SmoothStreamCard(props: SmoothStreamCardProps) {
 }
 
 /**
- * Translation-channel form. Kept independent of the durable smooth-stream
+ * Translation-channel form. Kept independent of the durable think-box
  * settings so it works even where the deployment stores those read-only: it
  * writes the plugin-owned runtime store through its own loopback RPC.
  */
 function TranslationChannel(props: {
-  t: (key: SmoothStreamLocaleKey) => string
+  t: (key: ThinkBoxLocaleKey) => string
   translation: TranslationCardState
   edit: (patch: Partial<TranslationConfig>) => void
   save: () => void
@@ -281,8 +281,8 @@ function TranslationChannel(props: {
  * card props above plus the view mode the page asks for (`'page'` on the
  * bundle detail page; `'summary'` is reserved for official-plugin cards).
  */
-export type SmoothStreamConfigPageProps =
-  SmoothStreamCardProps
+export type ThinkBoxConfigPageProps =
+  ThinkBoxCardProps
   & { view?: 'page' | 'summary' }
 
 /**
@@ -293,11 +293,11 @@ export type SmoothStreamConfigPageProps =
  * settings page used to draw around registered cards. The card stays an
  * `<li>`; only its list chrome moves here.
  */
-export function SmoothStreamConfigPage(props: SmoothStreamConfigPageProps) {
+export function ThinkBoxConfigPage(props: ThinkBoxConfigPageProps) {
   if (props.view === 'summary') return null
   return (
     <ul className={css.pluginPageList}>
-      <SmoothStreamCard {...props} />
+      <ThinkBoxCard {...props} />
     </ul>
   )
 }

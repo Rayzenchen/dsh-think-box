@@ -9,7 +9,7 @@
 
 import { type KeyboardEvent, type ReactNode } from 'react'
 import { IconChevronDown } from './harnessIcons.ts'
-import css from './TypewriterAssistantNodeView.module.css'
+import css from './ReasoningAssistantNodeView.module.css'
 
 /** Class-name join for optional overlay classes over the chrome defaults. */
 function cx(...parts: Array<string | undefined>): string {

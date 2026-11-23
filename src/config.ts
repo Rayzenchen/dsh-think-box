@@ -8,7 +8,7 @@
  * volatile fields on the Host schema, and translation is a composition seed.
  */
 
-import { DEFAULT_STREAM_SETTINGS } from './settings.ts'
+import { DEFAULT_THINK_BOX_SETTINGS } from './settings.ts'
 
 /**
  * Read-only reference for one volatile config field. Cordis replaces the plain
@@ -29,7 +29,7 @@ export interface Volatile<T> {
  * browser module id and the key the plugin-manager page uses for this bundle's
  * own configuration slot, so those three must agree.
  */
-export const STREAM_PACKAGE_ID = '@local/dsh-think-box'
+export const THINK_BOX_PACKAGE_ID = '@local/dsh-think-box'
 
 /** Which host service translates the reasoning box. */
 export type TranslationBackend = 'bundle' | 'llm'
@@ -85,7 +85,7 @@ export const DEFAULT_TRANSLATION_CONFIG: TranslationConfig = {
  * The live preferences are read from their volatile references at injection
  * time, so this object only ever contains plain values.
  */
-export interface StreamConfig {
+export interface ThinkBoxConfig {
   /** Whether this plugin takes over the assistant row. */
   readonly enabled: boolean
   /** Whether the inline reasoning box follows its own stream. */
@@ -95,8 +95,8 @@ export interface StreamConfig {
 }
 
 /** Defaults shared by the Host schema and the client-side fallback. */
-export const DEFAULT_STREAM_CONFIG: StreamConfig = {
-  ...DEFAULT_STREAM_SETTINGS,
+export const DEFAULT_THINK_BOX_CONFIG: ThinkBoxConfig = {
+  ...DEFAULT_THINK_BOX_SETTINGS,
   translation: DEFAULT_TRANSLATION_CONFIG,
 }
 
@@ -105,4 +105,4 @@ export const DEFAULT_STREAM_CONFIG: StreamConfig = {
  * graph carries no per-entry config, so this inline script is the only
  * Host-to-client configuration channel for a composed web plugin.
  */
-export const STREAM_BOOT_GLOBAL = '__DSH_SMOOTH_STREAM_CONFIG__'
+export const THINK_BOX_BOOT_GLOBAL = '__DSH_THINK_BOX_CONFIG__'

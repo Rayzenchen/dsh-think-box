@@ -1,10 +1,10 @@
 {
   "name": "@local/dsh-think-box",
   "version": "1.1.0",
-  "description": "本地定制版思考显示框：常驻「思考」右侧的多行推理窗，点击展开全文，缓动追赶流式输出。",
+  "description": "本地定制版思考显示与翻译插件：行内多行推理窗、点击展开全文、结束回卷；思考内容可选翻译。",
   "meta": {
     "title": "思维链显示增强",
-    "description": "把模型的思考过程变成一个稳定的展示框：常驻「思考」右侧、多行实时显示、缓动跟随流式输出；点击「思考」可在下方展开全文（最多 18 行），结束后自动回到开头并收缩为一行。"
+    "description": "把模型的思考过程放进「思考」行右侧的行内推理窗：默认三行、点击展开最多 18 行、结束回卷收成一行；逐字节奏与淡入固定开启，并把思考内容按需翻译成界面语言。"
   },
   "license": "MIT",
   "type": "module",
@@ -18,8 +18,6 @@
     "deepseek",
     "dsh",
     "cordis",
-    "streaming",
-    "smooth-scrolling",
     "typewriter",
     "reasoning",
     "translation",

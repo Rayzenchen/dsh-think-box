@@ -4,11 +4,11 @@
  * client entry reads at apply time. Same pattern as ui-theme's boot theme.
  */
 
-import { STREAM_BOOT_GLOBAL, type StreamConfig } from './config.ts'
+import { THINK_BOX_BOOT_GLOBAL, type ThinkBoxConfig } from './config.ts'
 
 /** Build the inline script assigning the validated config to the boot global. */
-function bootConfigScript(config: StreamConfig): string {
-  return `<script>window[${JSON.stringify(STREAM_BOOT_GLOBAL)}]=${JSON.stringify(config)}</script>`
+function bootConfigScript(config: ThinkBoxConfig): string {
+  return `<script>window[${JSON.stringify(THINK_BOX_BOOT_GLOBAL)}]=${JSON.stringify(config)}</script>`
 }
 
 /**
@@ -19,7 +19,7 @@ function bootConfigScript(config: StreamConfig): string {
  * @param config - Schema-validated plugin configuration.
  * @returns HTML containing the config bootstrap.
  */
-export function injectStreamConfig(html: string, config: StreamConfig): string {
+export function injectThinkBoxConfig(html: string, config: ThinkBoxConfig): string {
   const script = bootConfigScript(config)
   const body = /<body(?:\s[^>]*)?>/i.exec(html)
   if (body === null) return `${html}${script}`

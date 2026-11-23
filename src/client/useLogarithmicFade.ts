@@ -7,8 +7,8 @@ export const FADE_TAIL_SIZE = 24
 export const FADE_MAX_TAIL_SIZE = 160
 export const FADE_MIN_OPACITY = 0
 const FADE_STEPS = 32
-const PREFIX = 'dsh-smooth-stream-log-fade-'
-const COLOR_PROPERTY = '--dsh-smooth-stream-fade-color'
+const PREFIX = 'dsh-think-box-log-fade-'
+const COLOR_PROPERTY = '--dsh-think-box-fade-color'
 // Lightning CSS scopes highlight identifiers as well as class names.
 const highlightName = (index: number): string => css[`${PREFIX}${index}`] ?? `${PREFIX}${index}`
 const EXCLUDED = 'pre,code,math,.katex,.katex-display,mjx-container,svg,script,style,textarea,input,button,select,[role="button"],[contenteditable],[hidden],[aria-hidden="true"],[aria-live]'

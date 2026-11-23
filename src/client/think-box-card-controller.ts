@@ -1,13 +1,13 @@
-/** Staged form state for the plugin-owned smooth-stream settings RPC. */
+/** Staged form state for the plugin-owned think-box settings RPC. */
 
 import { createSnapshotStore, type SnapshotStore } from './clientStore.ts'
 import { DEFAULT_TRANSLATION_CONFIG, type TranslationConfig } from '../config.ts'
-import { DEFAULT_STREAM_SETTINGS, type StreamSettings } from '../settings.ts'
-import type { StreamSettingsView } from '../settings-api.ts'
-import type { SmoothStreamSettingsApi } from './smooth-stream-settings-api.ts'
+import { DEFAULT_THINK_BOX_SETTINGS, type ThinkBoxSettings } from '../settings.ts'
+import type { ThinkBoxSettingsView } from '../settings-api.ts'
+import type { ThinkBoxSettingsApi } from './think-box-settings-api.ts'
 
 /** What the settings card renders. It stays visible while its Host RPC loads. */
-export interface SmoothStreamCardState {
+export interface ThinkBoxCardState {
   status: 'loading' | 'ready' | 'unavailable'
   writable: boolean
   dirty: boolean
@@ -36,12 +36,12 @@ export interface TranslationCardState {
 }
 
 /** The registration-side face injected into the settings slot renderer. */
-export interface SmoothStreamCardFace {
+export interface ThinkBoxCardFace {
   hooks: {
-    smoothStreamCard: SnapshotStore<SmoothStreamCardState>
+    thinkBoxCard: SnapshotStore<ThinkBoxCardState>
     translationCard: SnapshotStore<TranslationCardState>
   }
-  edit: (patch: Partial<StreamSettings>) => void
+  edit: (patch: Partial<ThinkBoxSettings>) => void
   save: () => void
   discard: () => void
   reload: () => void
@@ -52,10 +52,10 @@ export interface SmoothStreamCardFace {
 }
 
 /** Bridges the plugin's protected Host interface onto a staged settings form. */
-export class SmoothStreamCardController {
-  private readonly store = createSnapshotStore<SmoothStreamCardState>(this.projection())
-  private loaded: StreamSettingsView | undefined
-  private staged: StreamSettings | undefined
+export class ThinkBoxCardController {
+  private readonly store = createSnapshotStore<ThinkBoxCardState>(this.projection())
+  private loaded: ThinkBoxSettingsView | undefined
+  private staged: ThinkBoxSettings | undefined
   private saving = false
   private failed = false
   private loadGeneration = 0
@@ -69,7 +69,7 @@ export class SmoothStreamCardController {
   private translationGeneration = 0
 
   constructor(
-    private readonly api: SmoothStreamSettingsApi,
+    private readonly api: ThinkBoxSettingsApi,
     private readonly translation?: TranslationCardBridge,
   ) {
     this.translationStatus = translation === undefined ? 'unavailable' : 'loading'
@@ -90,7 +90,7 @@ export class SmoothStreamCardController {
   }
 
   /** Current card snapshot, also consumed by the streaming preference cell. */
-  getSnapshot(): SmoothStreamCardState {
+  getSnapshot(): ThinkBoxCardState {
     return this.store.getSnapshot()
   }
 
@@ -100,9 +100,9 @@ export class SmoothStreamCardController {
   }
 
   /** Build the face consumed by the settings slot renderer. */
-  inject(): SmoothStreamCardFace {
+  inject(): ThinkBoxCardFace {
     return {
-      hooks: { smoothStreamCard: this.store, translationCard: this.translationStore },
+      hooks: { thinkBoxCard: this.store, translationCard: this.translationStore },
       edit: (patch) => {
         if (this.saving) return
         this.staged = {
@@ -139,7 +139,7 @@ export class SmoothStreamCardController {
     }
   }
 
-  private projection(): SmoothStreamCardState {
+  private projection(): ThinkBoxCardState {
     return {
       status: this.loadStatus,
       writable: this.loaded?.writable ?? false,
@@ -150,15 +150,15 @@ export class SmoothStreamCardController {
     }
   }
 
-  private baseValues(): StreamSettings {
+  private baseValues(): ThinkBoxSettings {
     return this.staged ?? {
-      enabled: this.loaded?.enabled ?? DEFAULT_STREAM_SETTINGS.enabled,
-      thinkAutoExpand: this.loaded?.thinkAutoExpand ?? DEFAULT_STREAM_SETTINGS.thinkAutoExpand,
+      enabled: this.loaded?.enabled ?? DEFAULT_THINK_BOX_SETTINGS.enabled,
+      thinkAutoExpand: this.loaded?.thinkAutoExpand ?? DEFAULT_THINK_BOX_SETTINGS.thinkAutoExpand,
     }
   }
 
   /** Complete settings projection consumed by the live SettingsCell bridge. */
-  values(): StreamSettings {
+  values(): ThinkBoxSettings {
     return this.baseValues()
   }
 

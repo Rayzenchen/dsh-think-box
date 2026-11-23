@@ -91,4 +91,4 @@ describe('createTranslationSettingsApi', () => {
 })
 
 // The channel constant is part of the wire contract; keep it pinned here.
-expect(TRANSLATION_RPC_CHANNEL).toBe('/smooth-stream-translate')
+expect(TRANSLATION_RPC_CHANNEL).toBe('/think-box-translate')

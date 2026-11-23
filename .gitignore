@@ -9,19 +9,7 @@ lib/
 *.log
 
 # Generated outputs and agent-workflow files (not sources)
-repro/bundle.js
-repro/bundle.css
-repro/audit.bundle.js
-repro/audit.bundle.css
-repro/overlap.bundle.js
-repro/overlap.bundle.css
-repro/artifacts/
 .mt-probe.*
-benchmarks/results/
 .workbuddy/
 .gtoffice/
 skills-lock.json
-
-# Local one-off diagnostic scripts (kept on disk, not tracked)
-scratch/capture-composer-bug.js
-scratch/check-scroll.js

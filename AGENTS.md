@@ -2,20 +2,19 @@
 
 ## Project Structure & Module Organization
 
-`src/` contains the Host half of the plugin: the entry point (`src/index.ts` re-exports `src/plugin.ts`), the Schemastery config with its volatile preference fields, the settings RPC channel, and the reasoning-translation bridge. Browser code lives in `src/client/`: React components, hooks, locales, and CSS Modules, with `src/client/index.ts` as its entry point. Tests in `tests/` separate host and browser behavior with names such as `stream.client.spec.tsx` and `settings.host.spec.tsx`; `tests/shims/` holds the Vitest-only doubles of the Host browser packages (the real ones are prebuilt `window.__ModuleLoader__` bundles). `locale/` carries the Plugins-page metadata (including `meta.detail`, which points at `docs/DETAIL.md`), and `cordis.patch.yml` is the default config layer injected when this package is loaded as a bundle. `benchmarks/` and `scripts/run-stream-benchmark.mjs` hold the stream benchmark and its harness; `lib/` is generated. Do not reference the harness checkout by relative path: DSH contracts are described in this repository's README/DETAIL and in the installed Harness packages, and a `../deepseek-harness` sibling no longer exists for this fork.
+`src/` is the Host half: the plugin entry (`src/index.ts` → `src/plugin.ts`), the Schemastery config, the loopback settings RPC, and the reasoning-translation bridge. `src/client/` is the browser half: the reasoning-box renderer (`ReasoningAssistantNodeView.tsx`), its disclosure chrome, the reveal/fade engines (`useReasoningReveal.ts`, `useLogarithmicFade.ts`, `FrameCoordinator.ts`), the settings card (`ThinkBoxCard.tsx` + controller), locale dictionaries, and the translation client/runtime. Tests in `tests/` split Host and browser behavior (`*.host.spec.tsx` / `*.client.spec.tsx`); `tests/shims/` holds the Vitest doubles of the Host browser packages (the real ones are prebuilt bundles). `locale/` carries the Plugins-page metadata (`meta.detail` → `docs/DETAIL.md`), and `cordis.patch.yml` is the default config layer injected when the package is loaded as a bundle. `scripts/` contains only `check-lib-fresh.mjs`; `lib/` is generated.
 
 ## Build, Test, and Development Commands
 
-Prefer the executables under `node_modules/.bin` directly. The `pnpm` scripts can trigger a dependency reinstall on this machine (which aborts without a TTY), so use:
+Prefer the executables under `node_modules/.bin`. The `pnpm` scripts can trigger a dependency reinstall on this machine (which aborts without a TTY), so use:
 
 - `./node_modules/.bin/tsc -p tsconfig.json --pretty false` — strict type check, no emit.
 - `./node_modules/.bin/vitest run` — full suite once under jsdom.
-- `./node_modules/.bin/vitest run tests/stream.client.spec.tsx` — one suite.
+- `./node_modules/.bin/vitest run tests/think-box.client.spec.tsx` — one suite.
 - `./node_modules/.bin/tsdown` — build the Host ESM library (`lib/index.js`) and browser bundle (`lib/client.js`).
 - `node scripts/check-lib-fresh.mjs` — verify `lib/` is newer than `src/client` (the Host serves a boot-rev'd bundle).
-- `node scripts/run-stream-benchmark.mjs` — record stream-engine benchmarks; review result changes manually.
 
-Node `^22.19.0 || >=24` is required. The fork commit dropped the upstream standalone browser-reproduction harness, so this repository has no bundling target for it; browser QA goes through the Vitest suite and the dev-only scripts.
+Node `^22.19.0 || >=24` is required. There is no standalone browser-reproduction harness or benchmark target in this repository.
 
 ## Coding Style & Naming Conventions
 
@@ -23,10 +22,17 @@ Follow the existing two-space indentation, single quotes, no semicolons, and tra
 
 ## Testing Guidelines
 
-Use Vitest, Testing Library, and jsdom. Name tests `*.spec.tsx` and add regressions to the relevant Host or browser suite. Control animation, timers, layout metrics, and globals deterministically, then clean them up — the per-document `FrameCoordinator` must be shut down between cases or leaked tasks poison later ones. There is no coverage threshold; every behavioral fix should add a focused assertion.
+Use Vitest, Testing Library, and jsdom. Name tests `*.spec.tsx` and add regressions to the relevant Host or browser suite. Control animation, timers, layout metrics, and globals deterministically, then clean them up: the per-document `FrameCoordinator` and its highlight registry are shared, so shut the frame clock down between cases or tasks leak into later tests. Do not use `it.skip`/`describe.skip`; the suite is expected to stay fully green.
 
-Current baseline: **269 of 297 tests pass**. The 28 known failures are pre-existing streaming geometry/timing cases (`stream.client.spec.tsx`, 18) and logarithmic-fade cases (`logarithmic-fade.client.spec.tsx`, 10); they are tracked, not green, and new failures are not acceptable. Before submitting, run the type check, the full suite, and `tsdown`, and compare failures against this baseline rather than assuming "all green".
+Current baseline: **129 of 129 tests pass** (no skips). The reasoning box keeps dedicated regressions for the inline three-line window, click-to-open body, one-shot settle flourish, groupPart split, takeover swap/restore/late-register, `turnProcess` fold, and reduced-motion bypass. Settings has Host, channel, and card suites; translation has Host, runtime, and client suites. Before submitting, run the type check, the full suite, and `tsdown`.
+
+## Plugin Contracts Worth Knowing
+
+- `applied` takeover: only the built-in `assistant-step` entry is swapped in place; a `priority: -100` shadow is registered solely when the composition declares no built-in row.
+- Settings: `enabled` and `thinkAutoExpand` are volatile fields in the profile entry; `configEditor.edit()` writes only the two fields plus the translation seed, so legacy keys disappear on the first save.
+- Boot bridge: `window.__DSH_THINK_BOX_CONFIG__` carries a plain `{ enabled, thinkAutoExpand, translation }` snapshot; tolerate extra fields from an older Host and fail loudly only on a malformed preference.
+- Translation: the reasoning box consumes translated fragments only while its toggle (or `autoTranslate`) is active; the original feed is never sent otherwise.
 
 ## Commit & Pull Request Guidelines
 
-History uses concise Conventional Commit subjects: `feat: add ...`, `fix: prevent ...`, `docs: update ...`, and `chore: release ...`. Keep commits focused and summaries imperative. Pull requests should explain user-visible effects, call out Harness API or configuration changes, list verification commands, and link issues. Include screenshots or a short recording for settings, rendering, scrolling, or other motion-sensitive UI changes.
+History uses concise Conventional Commit subjects: `feat: add ...`, `fix: prevent ...`, `docs: update ...`, `refactor: ...`, `test: ...`. Keep commits focused and summaries imperative. Pull requests should explain user-visible effects, call out Harness API or configuration changes, list verification commands, and include screenshots or a short recording for motion-sensitive UI changes.

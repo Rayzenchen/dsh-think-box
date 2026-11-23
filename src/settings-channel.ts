@@ -67,7 +67,7 @@ type BodyRead =
  * The registration is an effect of `ctx`, so the caller's fiber owns the
  * channel's lifetime on either path.
  * @param ctx - Host context carrying `connection` and, when composed, `webServer`.
- * @param channel - absolute channel prefix, e.g. `/smooth-stream`.
+ * @param channel - absolute channel prefix, e.g. `/think-box`.
  * @param handler - decoded endpoint handler for every endpoint on the channel.
  * @returns Disposer that withdraws the channel.
  */
@@ -94,7 +94,7 @@ export function registerSettingsChannel(
     const viaService = tryServiceChannel(connection, channel, handler)
     if (viaService !== undefined) return viaService
     return mountDirectRoute(ctx, connection, channel, handler)
-  }, `dsh-smooth-stream: ${channel} RPC channel`)
+  }, `dsh-think-box: ${channel} RPC channel`)
 }
 
 /**
@@ -117,7 +117,7 @@ function tryServiceChannel(
     // A kernel that cannot resolve `webServer` inside the service throws here;
     // the direct route below keeps the card reachable on that kernel.
     console.warn(
-      `[dsh-smooth-stream] connection.rpc.handle() could not mount ${channel}; `
+      `[dsh-think-box] connection.rpc.handle() could not mount ${channel}; `
       + 'falling back to a directly registered route',
       error,
     )
@@ -145,17 +145,17 @@ function mountDirectRoute(
   const webServer = ctx.get('webServer') as ChannelWebServer | undefined
   const reject = connection?.requestRejection
   if (webServer === undefined || typeof webServer.register !== 'function') {
-    throw new Error(`dsh-smooth-stream: webServer is unavailable, so ${channel} cannot be mounted`)
+    throw new Error(`dsh-think-box: webServer is unavailable, so ${channel} cannot be mounted`)
   }
   if (typeof reject !== 'function') {
     if (connection !== undefined) {
       throw new Error(
-        `dsh-smooth-stream: connection.requestRejection is unavailable, so ${channel} `
+        `dsh-think-box: connection.requestRejection is unavailable, so ${channel} `
         + 'cannot be mounted behind the connection trust fence',
       )
     }
     console.warn(
-      `[dsh-smooth-stream] ${channel} mounted without the connection trust fence `
+      `[dsh-think-box] ${channel} mounted without the connection trust fence `
       + '(dsh 0.2.x: the connection service is not injectable here); '
       + 'loopback and the app token gate remain the only protections',
     )

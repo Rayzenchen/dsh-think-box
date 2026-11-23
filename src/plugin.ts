@@ -4,23 +4,23 @@ import type { ConnectionRpcHandler } from '@deepseek-ai/dsh-client-connection'
 import Schema from '@deepseek-ai/schemastery'
 import {
   DEFAULT_TRANSLATION_CONFIG,
-  type StreamConfig,
+  type ThinkBoxConfig,
   type Volatile,
 } from './config.ts'
 import { createLlmTranslationRoute, createTranslationHandler, type LlmServiceLike } from './translation-host.ts'
 import { TRANSLATION_RPC_CHANNEL } from './translation-protocol.ts'
 import { createTranslationSettingsStore } from './translation-settings.ts'
-import { injectStreamConfig } from './boot-config.ts'
+import { injectThinkBoxConfig } from './boot-config.ts'
 import { registerSettingsChannel } from './settings-channel.ts'
 import {
-  STREAM_SETTINGS_RPC,
-  STREAM_SETTINGS_RPC_CHANNEL,
-  type StreamSettingsView,
+  THINK_BOX_SETTINGS_RPC,
+  THINK_BOX_SETTINGS_RPC_CHANNEL,
+  type ThinkBoxSettingsView,
 } from './settings-api.ts'
 import {
-  DEFAULT_STREAM_SETTINGS,
-  STREAM_SETTINGS_NS,
-  type StreamSettings,
+  DEFAULT_THINK_BOX_SETTINGS,
+  THINK_BOX_SETTINGS_NS,
+  type ThinkBoxSettings,
 } from './settings.ts'
 
 /** Display name shown by the Host loader while the plugin is mounted. */
@@ -86,12 +86,12 @@ function volatileField<T>(schema: Schema<T>): Schema<T> {
  * with plain values (the schema output turns the preference fields into
  * references).
  */
-export type ConfigInput = Partial<StreamConfig>
+export type ConfigInput = Partial<ThinkBoxConfig>
 
 /** Plugin configuration schema. Both preferences live in the profile entry. */
 export const Config = Schema.object({
-  enabled: volatileField(Schema.boolean().default(DEFAULT_STREAM_SETTINGS.enabled)),
-  thinkAutoExpand: volatileField(Schema.boolean().default(DEFAULT_STREAM_SETTINGS.thinkAutoExpand)),
+  enabled: volatileField(Schema.boolean().default(DEFAULT_THINK_BOX_SETTINGS.enabled)),
+  thinkAutoExpand: volatileField(Schema.boolean().default(DEFAULT_THINK_BOX_SETTINGS.thinkAutoExpand)),
   translation: Schema.object({
     backend: Schema.union(['bundle', 'llm'] as const).default(DEFAULT_TRANSLATION_CONFIG.backend),
     provider: Schema.string().default(DEFAULT_TRANSLATION_CONFIG.provider),
@@ -152,7 +152,7 @@ function resolveConfigTarget(ctx: Context): ConfigTarget | undefined {
 }
 
 /** Read the live preference snapshot from the volatile references. */
-function readSettings(config: Config): StreamSettings {
+function readSettings(config: Config): ThinkBoxSettings {
   return {
     enabled: config.enabled.get(),
     thinkAutoExpand: config.thinkAutoExpand.get(),
@@ -166,7 +166,7 @@ function readSettings(config: Config): StreamSettings {
  * @param config - resolved plugin configuration.
  * @returns plain config object for the browser half.
  */
-function bootSnapshot(config: Config): StreamConfig {
+function bootSnapshot(config: Config): ThinkBoxConfig {
   return {
     ...readSettings(config),
     translation: { ...config.translation },
@@ -175,7 +175,7 @@ function bootSnapshot(config: Config): StreamConfig {
 
 /** Validation verdict for one settings write. */
 type PatchResult =
-  | { readonly ok: true; readonly settings: StreamSettings }
+  | { readonly ok: true; readonly settings: ThinkBoxSettings }
   | { readonly ok: false; readonly message: string }
 
 /**
@@ -184,18 +184,18 @@ type PatchResult =
  * @param payload - raw RPC payload.
  * @returns the complete settings object to persist, or the rejection message.
  */
-function mergeSettingsPatch(current: StreamSettings, payload: unknown): PatchResult {
+function mergeSettingsPatch(current: ThinkBoxSettings, payload: unknown): PatchResult {
   if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
     return { ok: false, message: 'settings payload must be an object' }
   }
-  const next = payload as Partial<Record<keyof StreamSettings, unknown>>
+  const next = payload as Partial<Record<keyof ThinkBoxSettings, unknown>>
   if (next.enabled !== undefined && typeof next.enabled !== 'boolean') {
     return { ok: false, message: 'enabled must be a boolean' }
   }
   if (next.thinkAutoExpand !== undefined && typeof next.thinkAutoExpand !== 'boolean') {
     return { ok: false, message: 'thinkAutoExpand must be a boolean' }
   }
-  const merged: StreamSettings = {
+  const merged: ThinkBoxSettings = {
     enabled: typeof next.enabled === 'boolean' ? next.enabled : current.enabled,
     thinkAutoExpand: typeof next.thinkAutoExpand === 'boolean' ? next.thinkAutoExpand : current.thinkAutoExpand,
   }
@@ -203,7 +203,7 @@ function mergeSettingsPatch(current: StreamSettings, payload: unknown): PatchRes
 }
 
 /** Commit every preference field into its volatile reference. */
-function writeSettingsRefs(config: Config, settings: StreamSettings): void {
+function writeSettingsRefs(config: Config, settings: ThinkBoxSettings): void {
   writeConfigRef(config.enabled, settings.enabled)
   writeConfigRef(config.thinkAutoExpand, settings.thinkAutoExpand)
 }
@@ -220,7 +220,7 @@ function writeSettingsRefs(config: Config, settings: StreamSettings): void {
  * @param settings - complete preference snapshot to persist.
  * @returns fulfillment after the Loader reconciled the profile patch.
  */
-async function persistSettings(target: ConfigTarget, settings: StreamSettings): Promise<void> {
+async function persistSettings(target: ConfigTarget, settings: ThinkBoxSettings): Promise<void> {
   await target.editor.edit(target.entry, (current, inherited) => {
     const translation = current.translation ?? inherited.translation
     const next: Record<string, unknown> = {
@@ -257,8 +257,8 @@ export function apply(ctx: Context, config: Config): void {
   // script only ever receives plain data.
   ctx.inject(['webServer'], (httpCtx) => {
     httpCtx.effect(
-      () => httpCtx.webServer.tapIndex(html => injectStreamConfig(html, bootSnapshot(config))),
-      'dsh-smooth-stream: boot config bridge',
+      () => httpCtx.webServer.tapIndex(html => injectThinkBoxConfig(html, bootSnapshot(config))),
+      'dsh-think-box: boot config bridge',
     )
   })
   // Opt-in LLM translation bridge: any registered Harness route can translate
@@ -287,11 +287,11 @@ export function apply(ctx: Context, config: Config): void {
       }
       if (typeof forms.configure !== 'function') return () => {}
       return forms.configure({ auto: false }, ctx.fiber)
-    }, 'dsh-smooth-stream: settings page policy')
+    }, 'dsh-think-box: settings page policy')
   })
 
   /** The current card view, including whether a profile write is possible. */
-  const view = (): StreamSettingsView => {
+  const view = (): ThinkBoxSettingsView => {
     const settings = readSettings(config)
     return {
       writable: resolveConfigTarget(ctx) !== undefined,
@@ -305,19 +305,19 @@ export function apply(ctx: Context, config: Config): void {
     ok: false,
     error: {
       code: 'settings-rejected',
-      message: 'smooth-stream settings are read-only: no config editor entry is available in this profile',
-      details: { ns: STREAM_SETTINGS_NS },
+      message: 'think-box settings are read-only: no config editor entry is available in this profile',
+      details: { ns: THINK_BOX_SETTINGS_NS },
     },
   }) as T
 
   const handle: ConnectionRpcHandler = async (endpoint, payload) => {
-    if (endpoint === STREAM_SETTINGS_RPC.read) return { ok: true, value: view() }
-    if (endpoint === STREAM_SETTINGS_RPC.write) {
+    if (endpoint === THINK_BOX_SETTINGS_RPC.read) return { ok: true, value: view() }
+    if (endpoint === THINK_BOX_SETTINGS_RPC.write) {
       const target = resolveConfigTarget(ctx)
       if (target === undefined) return readOnly()
       const merged = mergeSettingsPatch(readSettings(config), payload)
       if (!merged.ok) {
-        return { ok: false, error: { code: 'settings-rejected', message: merged.message, details: { ns: STREAM_SETTINGS_NS } } }
+        return { ok: false, error: { code: 'settings-rejected', message: merged.message, details: { ns: THINK_BOX_SETTINGS_NS } } }
       }
       try {
         await persistSettings(target, merged.settings)
@@ -326,8 +326,8 @@ export function apply(ctx: Context, config: Config): void {
           ok: false,
           error: {
             code: 'settings-rejected',
-            message: 'smooth-stream settings could not be saved to the profile',
-            details: { ns: STREAM_SETTINGS_NS },
+            message: 'think-box settings could not be saved to the profile',
+            details: { ns: THINK_BOX_SETTINGS_NS },
           },
         }
       }
@@ -337,7 +337,7 @@ export function apply(ctx: Context, config: Config): void {
       writeSettingsRefs(config, merged.settings)
       return { ok: true, value: view() }
     }
-    return { ok: false, error: { code: 'internal', message: `unknown smooth-stream endpoint ${JSON.stringify(endpoint)}`, details: {} } }
+    return { ok: false, error: { code: 'internal', message: `unknown think-box endpoint ${JSON.stringify(endpoint)}`, details: {} } }
   }
 
   // Mount the card channel on whichever fiber can own it: the Connection
@@ -349,11 +349,11 @@ export function apply(ctx: Context, config: Config): void {
   const mountChannel = (mountCtx: Context): void => {
     if (mounted) return
     mounted = true
-    const dispose = registerSettingsChannel(mountCtx, STREAM_SETTINGS_RPC_CHANNEL, handle)
+    const dispose = registerSettingsChannel(mountCtx, THINK_BOX_SETTINGS_RPC_CHANNEL, handle)
     mountCtx.effect(() => () => {
       mounted = false
       dispose()
-    }, 'dsh-smooth-stream: settings channel lifetime')
+    }, 'dsh-think-box: settings channel lifetime')
   }
   ctx.inject(['connection'], mountChannel)
   ctx.inject(['webServer'], mountChannel)

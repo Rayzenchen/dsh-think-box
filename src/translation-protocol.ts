@@ -8,7 +8,7 @@
  */
 
 /** Absolute Connection RPC channel prefix for the reasoning translator. */
-export const TRANSLATION_RPC_CHANNEL = '/smooth-stream-translate'
+export const TRANSLATION_RPC_CHANNEL = '/think-box-translate'
 
 /** Endpoints accepted on {@link TRANSLATION_RPC_CHANNEL}. */
 export const TRANSLATION_RPC = {

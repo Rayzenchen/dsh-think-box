@@ -13,8 +13,6 @@ import { createLlmTranslationRoute, createTranslationHandler, type LlmServiceLik
 import { TRANSLATION_RPC_CHANNEL } from './translation-protocol.ts'
 import { createTranslationSettingsStore } from './translation-settings.ts'
 import { injectStreamConfig } from './boot-config.ts'
-import { STREAM_PACKAGE_NAME, STREAM_PACKAGE_VERSION } from './package-meta.ts'
-import { inspectProfileInstallation, updateNpmProfilePackage } from './profile-installation.ts'
 import { registerSettingsChannel } from './settings-channel.ts'
 import {
   STREAM_SETTINGS_RPC,
@@ -420,10 +418,9 @@ export function apply(ctx: Context, config: Config): void {
   /** The current card view, including whether a profile write is possible. */
   const view = (): StreamSettingsView => {
     const settings = readSettings(config)
-    const installation = inspectProfileInstallation(ctx.baseUrl, STREAM_PACKAGE_NAME)
     return {
-      version: STREAM_PACKAGE_VERSION,
-      installation: installation.kind,
+      version: '',
+      installation: 'unmanaged',
       writable: resolveConfigTarget(ctx) !== undefined,
       enabled: settings.enabled,
       controlScroll: settings.controlScroll,
@@ -431,7 +428,7 @@ export function apply(ctx: Context, config: Config): void {
       motionPreference: settings.motionPreference,
       thinkAutoExpand: settings.thinkAutoExpand,
       logarithmicFade: settings.logarithmicFade,
-      canUpgrade: installation.kind === 'npm',
+      canUpgrade: false,
     }
   }
 
@@ -444,7 +441,6 @@ export function apply(ctx: Context, config: Config): void {
     }
   }
 
-  let upgrade: Promise<void> | undefined
 
   /** Reject a write when this deployment cannot persist profile config. */
   const readOnly = <T>(): T => ({
@@ -512,24 +508,6 @@ export function apply(ctx: Context, config: Config): void {
       }
       writeSettingsRefs(config, merged.settings)
       return { ok: true, value: debugView() }
-    }
-    if (endpoint === STREAM_SETTINGS_RPC.upgrade) {
-      const installation = inspectProfileInstallation(ctx.baseUrl, STREAM_PACKAGE_NAME)
-      if (installation.kind !== 'npm') {
-        return { ok: false, error: { code: 'internal', message: 'smooth-stream is not an npm profile dependency', details: {} } }
-      }
-      if (upgrade !== undefined) {
-        return { ok: false, error: { code: 'internal', message: 'smooth-stream update is already running', details: {} } }
-      }
-      upgrade = updateNpmProfilePackage(installation.profileDir, STREAM_PACKAGE_NAME)
-      try {
-        await upgrade
-      } catch {
-        return { ok: false, error: { code: 'internal', message: 'smooth-stream update failed', details: {} } }
-      } finally {
-        upgrade = undefined
-      }
-      return { ok: true, value: { restartRequired: true } }
     }
     return { ok: false, error: { code: 'internal', message: `unknown smooth-stream endpoint ${JSON.stringify(endpoint)}`, details: {} } }
   }

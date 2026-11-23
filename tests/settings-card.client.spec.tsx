@@ -11,7 +11,6 @@ import { apply, inject } from '../src/client/index.ts'
 import { SmoothStreamCard, type SmoothStreamCardProps } from '../src/client/SmoothStreamCard.tsx'
 import type { SmoothStreamCardFace } from '../src/client/smooth-stream-card-controller.ts'
 import { en } from '../src/client/locales.ts'
-import { debugRuntime } from '../src/client/debugRuntime.ts'
 import {
   STREAM_SETTINGS_RPC,
   STREAM_SETTINGS_RPC_CHANNEL,
@@ -22,7 +21,6 @@ import { DEFAULT_STREAM_DEBUG_TUNING } from '../src/settings.ts'
 
 afterEach(() => {
   cleanup()
-  debugRuntime.resetRuntime()
 })
 
 const developmentView: StreamSettingsView = {
@@ -599,7 +597,6 @@ describe('smooth-stream settings card', () => {
       .toHaveLength(0)
     expect(slots.entries('conversation.chat.node').find(entry => entry.options.key === 'tool-call')?.component)
       .toBe(BuiltInTool)
-    expect(debugRuntime.getSnapshot()).toMatchObject({ enabled: false, dirty: false })
   })
 
   it('blocks preference edits while a save is in flight', async () => {

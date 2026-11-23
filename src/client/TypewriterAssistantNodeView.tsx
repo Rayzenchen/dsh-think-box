@@ -1,23 +1,16 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode, type RefObject } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { JsonBlock, MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
 import { ImageGallery, type ImageLoader, type MessageImageLabels } from '@deepseek-ai/dsh-client-ui-attachment'
 import type { ChatNodeViewProps, TurnTailOwnerProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { AnimatedDisclosure } from './AnimatedDisclosure.tsx'
 import { IconThink } from './harnessIcons.ts'
-import { notifyFollowCommit } from './teleprompterGlide.ts'
-import { useSmoothStreamContent, type StreamSmoothingPreset } from './useSmoothStreamContent.ts'
-import { useFpsGuard } from './useFpsGuard.ts'
+import { useSmoothStreamContent } from './useSmoothStreamContent.ts'
 import { useLogarithmicFade } from './useLogarithmicFade.ts'
-import { useDecoupledMarkdown } from './useDecoupledMarkdown.ts'
-import { FollowHost } from './FollowHost.tsx'
 import { useReasoningTranslation } from './useReasoningTranslation.ts'
 import type { ReasoningTranslationFace } from './reasoningTranslation.ts'
-import { DEFAULT_STREAM_CONFIG, type StreamMode } from '../config.ts'
-import { DEFAULT_STREAM_SETTINGS, type StreamMotionPreference } from '../settings.ts'
 import css from './TypewriterAssistantNodeView.module.css'
 
 type AssistantProps = ChatNodeViewProps<'assistant-step'>
-type MarkdownProps = Pick<ComponentProps<typeof MarkdownText>, 'labels' | 'fileMentions' | 'text'>
 
 function usePrefersReducedMotion(): boolean {
   const [reduced, setReduced] = useState(
@@ -31,332 +24,6 @@ function usePrefersReducedMotion(): boolean {
     return () => query.removeEventListener('change', onChange)
   }, [])
   return reduced
-}
-
-/**
- * Resolve whether the reveal engine should stay off for this view. The OS
- * preference wins only in `auto` mode: `force-smooth` keeps the engine on
- * machines where a system-wide reduce-motion switch (or a forced browser
- * flag) would otherwise silently bypass smoothing, and `force-reduced`
- * disables it even when the OS asks for motion. Credit: three-state design
- * proposed by @Zn-Dk in #21/#22.
- */
-function useMotionReduced(preference: StreamMotionPreference): boolean {
-  const system = usePrefersReducedMotion()
-  if (preference === 'force-smooth') return false
-  if (preference === 'force-reduced') return true
-  return system
-}
-
-interface AnimatedMarkdownTextProps extends MarkdownProps {
-  streaming: boolean
-  logarithmicFade: boolean
-  /** Whether the resolved reduced-motion gate keeps the reveal engine off. */
-  motionReduced: boolean
-  followSpeedCpsRef?: { current: number } | undefined
-  followRevealedCharsRef?: { current: number } | undefined
-  followRevealScaleRef?: { current: number } | undefined
-  onPredictiveChange?: ((predictive: boolean) => void) | undefined
-  /** Reports whether the final text arm still has visible reveal work. */
-  onRevealActivityChange?: ((active: boolean) => void) | undefined
-  preset: StreamSmoothingPreset
-  shouldHoldBack: () => boolean
-}
-
-/** Conservative fallback before the streaming Markdown tail has geometry. */
-const PREDICTIVE_WRAP_FALLBACK_CHARS = 32
-const STREAM_ANNOUNCEMENT_INTERVAL_MS = 800
-const STREAM_ANNOUNCEMENT_MAX_CHARS = 320
-
-interface PendingTextGeometry {
-  root: HTMLElement
-  visibleText: string
-  fontSize: number
-  wrapThresholdWidth: number | null
-}
-
-function approximateInlineWidth(text: string, emPx: number): number {
-  let width = 0
-  for (const char of text) {
-    if (/\s/u.test(char)) width += emPx * 0.33
-    else if (/^[\x00-\x7f]$/u.test(char)) width += emPx * 0.56
-    else width += emPx
-  }
-  return width
-}
-
-
-/** Whether buffered source can reach a new visual line before it drains. */
-function pendingTextCanGrow(
-  root: HTMLElement | null,
-  visibleText: string,
-  pending: string,
-  geometryRef: { current: PendingTextGeometry | null },
-): boolean {
-  if (pending === '') return false
-  if (/[\r\n]/u.test(pending)) return true
-  const pendingChars = [...pending]
-  if (pendingChars.length >= PREDICTIVE_WRAP_FALLBACK_CHARS) return true
-  if (root === null) return false
-
-  let geometry = geometryRef.current
-  if (geometry?.root !== root) {
-    const rootWidth = root.clientWidth || 600
-    geometry = { root, visibleText, fontSize: 14, wrapThresholdWidth: Math.max(120, rootWidth * 0.4) }
-    geometryRef.current = geometry
-  }
-  return approximateInlineWidth(pending, geometry.fontSize) >= (geometry.wrapThresholdWidth ?? (geometry.fontSize * PREDICTIVE_WRAP_FALLBACK_CHARS))
-}
-
-function announcementChunkEnd(source: string, start: number): number {
-  const hardEnd = Math.min(source.length, start + STREAM_ANNOUNCEMENT_MAX_CHARS)
-  if (hardEnd === source.length) return hardEnd
-  const softStart = start + Math.floor(STREAM_ANNOUNCEMENT_MAX_CHARS * 0.6)
-  for (let index = hardEnd - 1; index >= softStart; index -= 1) {
-    if (/[\s.,;:!?]/u.test(source[index] ?? '')) return index + 1
-  }
-  return hardEnd
-}
-
-/** Pace screen-reader updates independently from visual reveal frames. */
-interface StreamAnnouncementState {
-  text: string
-  revision: number
-  present: boolean
-}
-
-/** A commit-driven live region isolated from the visible Markdown subtree. */
-const StreamAnnouncement = memo(function StreamAnnouncement({
-  text,
-  active,
-}: {
-  text: string
-  active: boolean
-}) {
-  const [announcement, setAnnouncement] = useState<StreamAnnouncementState>({
-    text: '',
-    revision: 0,
-    present: active,
-  })
-  const sourceRef = useRef(text)
-  const activeRef = useRef(active)
-  const announcedOffsetRef = useRef(active ? 0 : text.length)
-  const drainSourceRef = useRef<string | null>(null)
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  useEffect(() => {
-    const clearTimer = (): void => {
-      if (timerRef.current === null) return
-      clearTimeout(timerRef.current)
-      timerRef.current = null
-    }
-
-    const publishNext = (source: string): boolean => {
-      const start = Math.min(announcedOffsetRef.current, source.length)
-      const end = announcementChunkEnd(source, start)
-      if (end <= start) return false
-      announcedOffsetRef.current = end
-      setAnnouncement(previous => ({
-        text: source.slice(start, end),
-        revision: previous.revision + 1,
-        present: true,
-      }))
-      return end < source.length
-    }
-
-    const hideAfterLinger = (): void => {
-      timerRef.current = setTimeout(() => {
-        timerRef.current = null
-        if (activeRef.current) return
-        drainSourceRef.current = null
-        setAnnouncement(previous => ({ ...previous, present: false }))
-      }, STREAM_ANNOUNCEMENT_INTERVAL_MS)
-    }
-
-    const drainNext = (): void => {
-      const source = drainSourceRef.current
-      if (source === null) return
-      if (!publishNext(source)) {
-        hideAfterLinger()
-        return
-      }
-      timerRef.current = setTimeout(() => {
-        timerRef.current = null
-        if (activeRef.current) return
-        drainNext()
-      }, STREAM_ANNOUNCEMENT_INTERVAL_MS)
-    }
-
-    const scheduleLive = (): void => {
-      if (timerRef.current !== null || announcedOffsetRef.current >= sourceRef.current.length) return
-      timerRef.current = setTimeout(() => {
-        timerRef.current = null
-        if (!activeRef.current) return
-        const source = sourceRef.current
-        if (publishNext(source)) scheduleLive()
-      }, STREAM_ANNOUNCEMENT_INTERVAL_MS)
-    }
-
-    const wasActive = activeRef.current
-    const previousSource = sourceRef.current
-    const continuingDrain = !active && !wasActive && drainSourceRef.current !== null
-    if (
-      !continuingDrain
-      && (!text.startsWith(previousSource) || announcedOffsetRef.current > text.length)
-    ) {
-      announcedOffsetRef.current = 0
-    }
-    sourceRef.current = text
-    activeRef.current = active
-
-    if (active) {
-      if (!wasActive) {
-        clearTimer()
-        drainSourceRef.current = null
-        setAnnouncement(previous => ({
-          text: '',
-          revision: previous.revision + 1,
-          present: true,
-        }))
-      }
-      scheduleLive()
-      return
-    }
-
-    if (!wasActive) {
-      if (drainSourceRef.current === null) announcedOffsetRef.current = text.length
-      return
-    }
-
-    clearTimer()
-    drainSourceRef.current = text
-    drainNext()
-  }, [active, text])
-
-  useEffect(() => () => {
-    if (timerRef.current !== null) clearTimeout(timerRef.current)
-    timerRef.current = null
-  }, [])
-
-  if (!active && !announcement.present) return null
-  const activating = active && !activeRef.current
-  return (
-    <span
-      className={css.visuallyHidden}
-      aria-live="polite"
-      aria-atomic="true"
-    >
-      <span key={announcement.revision}>{activating ? '' : announcement.text}</span>
-    </span>
-  )
-})
-
-/**
- * Smooth streaming text arm. While the reply runs, the accumulated source is
- * revealed through the smoother at a rate that tracks the model's arrival
- * and rendered by the Harness `MarkdownText`
- * streaming arm (incremental parse, frozen non-tail blocks), so there is no
- * raw-text tail and no text-to-markdown swap: the tree stays markdown
- * throughout. The outer assistant owner follows all text growth, including
- * the final drain, so wraps glide without a completion handoff. Once the
- * queue drains, the settled full parse (KaTeX math, fence highlighting, file
- * mentions) swaps in exactly once.
- */
-function AnimatedMarkdownText({
-  text,
-  labels,
-  fileMentions,
-  streaming,
-  logarithmicFade,
-  motionReduced,
-  followSpeedCpsRef,
-  followRevealedCharsRef,
-  followRevealScaleRef,
-  onPredictiveChange,
-  onRevealActivityChange,
-  preset,
-  shouldHoldBack,
-}: AnimatedMarkdownTextProps) {
-  const reduced = motionReduced
-  const [typing, setTyping] = useState(streaming)
-  const localSpeedCpsRef = useRef(35)
-  const followRootRef = useRef<HTMLDivElement>(null)
-  const predictionSourceRef = useRef<string | null>(null)
-  const predictionStateRef = useRef(false)
-  const predictionGeometryRef = useRef<PendingTextGeometry | null>(null)
-  const speedCpsRef = followSpeedCpsRef ?? localSpeedCpsRef
-  const displayed = useSmoothStreamContent(text, {
-    enabled: typing && !reduced,
-    inputComplete: !streaming,
-    preset,
-    shouldHoldBack,
-    speedCpsRef,
-    revealedCharsRef: followRevealedCharsRef,
-    revealScaleRef: followRevealScaleRef,
-    onRevealCommit: () => { notifyFollowCommit(followRootRef.current) },
-  })
-  const shown = reduced ? text : displayed
-  const live = typing && !reduced
-  const markdownShown = useDecoupledMarkdown(shown, live)
-  useLogarithmicFade(followRootRef, logarithmicFade && !reduced, live, speedCpsRef)
-
-  useEffect(() => {
-    const root = followRootRef.current
-    if (root === null || typeof ResizeObserver === 'undefined') return
-    const observer = new ResizeObserver(() => {
-      if (predictionGeometryRef.current?.root === root) predictionGeometryRef.current = null
-    })
-    observer.observe(root)
-    return () => { observer.disconnect() }
-  }, [])
-
-  useLayoutEffect(() => {
-    if (onPredictiveChange === undefined) return
-    const pending = text.slice(shown.length)
-    const sourceChanged = predictionSourceRef.current !== text
-    const next = !live || !streaming || pending === ''
-      ? false
-      : sourceChanged
-        ? pendingTextCanGrow(followRootRef.current, shown, pending, predictionGeometryRef)
-        : predictionStateRef.current
-    predictionSourceRef.current = text
-    predictionStateRef.current = next
-    onPredictiveChange(next)
-  }, [live, onPredictiveChange, shown, streaming, text])
-
-  useLayoutEffect(() => {
-    onRevealActivityChange?.(live)
-  }, [live, onRevealActivityChange])
-
-  // The stream closed: keep revealing the remaining queue, then swap to the
-  // settled parse exactly once. The markdown tree stays mounted until then.
-  useEffect(() => {
-    if (typing && !streaming && shown.length === text.length) setTyping(false)
-  }, [shown, streaming, text, typing])
-
-  // A row can mount before the projection flips its assistant step to
-  // `running`, which would freeze `typing` at false forever and leave the
-  // reveal engine off for the whole reply. Re-arm on the rising edge so late
-  // stream starts are still smoothed. (Adopted from #22 by @Zn-Dk.)
-  useEffect(() => {
-    if (streaming) setTyping(true)
-  }, [streaming])
-
-  if (!streaming && !live && text.trim() === '') return null
-
-  return (
-    <div ref={followRootRef} className={css.follow} data-follow-text="">
-      <MarkdownText
-        // `shown` stays authoritative through the completion drain: the
-        // settled parse swaps in only when the queue has actually emptied.
-        // Rendering `text` early bypasses the drain and teleports the tail.
-        text={live ? markdownShown : text}
-        streaming={live}
-        labels={labels}
-        fileMentions={live ? undefined : fileMentions}
-      />
-    </div>
-  )
 }
 
 function imageLabels(t: AssistantProps['t']): MessageImageLabels {
@@ -544,13 +211,7 @@ function AnimatedReasoning({
   text,
   running,
   turnStreaming,
-  preset,
   thinkAutoExpand,
-  motionReduced,
-  logarithmicFade,
-  shouldHoldBack,
-  followSpeedCpsRef,
-  followRevealScaleRef,
   sessionId,
   translation,
   translationLabel,
@@ -565,13 +226,7 @@ function AnimatedReasoning({
    * turns on; the turn is the only reliable "it is over" signal for it.
    */
   turnStreaming: boolean
-  preset: StreamSmoothingPreset
   thinkAutoExpand: boolean
-  motionReduced: boolean
-  logarithmicFade: boolean
-  shouldHoldBack: () => boolean
-  followSpeedCpsRef?: { current: number } | undefined
-  followRevealScaleRef?: { current: number } | undefined
   /** Owning Session, so saved translations can be persisted and reused. */
   sessionId: string | undefined
   /** Optional reasoning-translation Remote; absent when the bundle is off. */
@@ -582,7 +237,7 @@ function AnimatedReasoning({
   autoTranslate: boolean
   t: AssistantProps['t']
 }) {
-  const reduced = motionReduced
+  const reduced = usePrefersReducedMotion()
   // Opt-in machine translation for this block. The hook only schedules work
   // while the translated view is active, so the original feed never sends the
   // reader's reasoning to the translation provider.
@@ -622,8 +277,7 @@ function AnimatedReasoning({
   // are stable, so the fade controller moves between them on a toggle.
   const activeRef = expanded ? fadeRootRef : inlineRef
   const beltRef = useRef<BeltTracker>(emptyBelt())
-  const localFadeSpeedRef = useRef(35)
-  const fadeSpeedRef = followSpeedCpsRef ?? localFadeSpeedRef
+  const fadeSpeedRef = useRef(35)
   const userScrolledRef = useRef(false)
   const rafIdRef = useRef(0)
   // Latest "the live stream still owns this scroller" state. Tracked on every
@@ -637,28 +291,12 @@ function AnimatedReasoning({
   // keeps the CSS glide.
   const displayed = useSmoothStreamContent(sourceText, {
     enabled: running && !reduced,
-    preset,
-    shouldHoldBack,
     speedCpsRef: fadeSpeedRef,
-    revealScaleRef: followRevealScaleRef,
-    onRevealCommit: () => { notifyFollowCommit(commitAnchorRef.current) },
   })
   const shown = running && !reduced ? displayed : sourceText
-  // The fade and the settle lag belong to whichever box the reader sees.
-  useLogarithmicFade(activeRef, logarithmicFade && !reduced, running, fadeSpeedRef)
-
-  useLayoutEffect(() => {
-    // Nothing expands the body on its own any more: the live reasoning streams
-    // through the inline row box, and only a row click opens the full body, so
-    // a manual toggle is never wrestled back by the stream.
-    if (running) {
-      userScrolledRef.current = false
-    }
-    // A commit that changes this block's height must hand the follower its
-    // correction in the SAME task, before the grown-but-uncompensated frame
-    // can reach a paint.
-    notifyFollowCommit(commitAnchorRef.current)
-  }, [running])
+  // Fade is fixed on for this fork: it belongs to whichever box the reader
+  // sees, and the OS reduced-motion preference alone may skip it.
+  useLogarithmicFade(activeRef, !reduced, running, fadeSpeedRef)
 
   useEffect(() => {
     // Only the live stream owns the reading position. A settled block is
@@ -697,7 +335,7 @@ function AnimatedReasoning({
         rafIdRef.current = 0
       }
     }
-  }, [running, expanded, thinkAutoExpand, preset, logarithmicFade, reduced])
+  }, [running, expanded, thinkAutoExpand, reduced])
 
   useEffect(() => {
     return () => {
@@ -862,7 +500,7 @@ function AnimatedReasoning({
     }
     frame = requestAnimationFrame(step)
     return () => { cancelAnimationFrame(frame) }
-  }, [running, turnStreaming, expanded, preset])
+  }, [running, turnStreaming, expanded])
 
   /**
    * Toggle the body while pinning this row's viewport position. Opening it adds
@@ -931,7 +569,8 @@ function AnimatedReasoning({
       )
     : undefined
 
-  // Preserve FollowHost's layout wrapper without mounting a second scroll owner.
+  // Keep the same layout wrapper the old follow boundary used, so the reasoning
+  // box keeps its transcript spacing without mounting a scroll owner.
   return (
     <div className={css.follow} ref={commitAnchorRef}>
       <div className={css.think} data-variant="think" data-state={running ? 'running' : 'ok'}>
@@ -980,26 +619,16 @@ function AnimatedReasoning({
 }
 
 /**
- * Assistant node renderer for the typewriter overlay. Text observed while
- * streaming is revealed by the smoother through the Harness Markdown
- * renderer at a rate that tracks arrival. Reasoning blocks keep the
- * built-in Think disclosure and only receive a smoothed text feed; the
- * outer node owns conversation-port follow through both streaming and the
- * final text drain. Keeping one owner avoids a lifecycle handoff that would
- * reopen and later retire a second runway. The FPS guard holds offscreen
- * reveals when the frame rate is degraded. Settled text renders with the full
- * Markdown pipeline.
+ * Assistant node renderer for the reasoning-box overlay.
+ *
+ * The body is rendered directly by the Harness primitives: text through
+ * `MarkdownText`, images through `ImageGallery`, unknown payloads through
+ * `JsonBlock`. This fork removed the body reveal/follow engine, so nothing
+ * here paces or scrolls the answer; only the reasoning box still owns its
+ * own inline preview, character reveal, fade and settle flourish.
  */
 export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNodeView({
-  mode: _mode = DEFAULT_STREAM_CONFIG.mode,
-  preset = DEFAULT_STREAM_CONFIG.preset,
-  revealCharsPerSec: _revealCharsPerSec = DEFAULT_STREAM_CONFIG.revealCharsPerSec,
-  scrollSpeedPxPerSec: _scrollSpeedPxPerSec = DEFAULT_STREAM_CONFIG.scrollSpeedPxPerSec,
-  maxScrollSpeedPxPerSec: _maxScrollSpeedPxPerSec = DEFAULT_STREAM_CONFIG.maxScrollSpeedPxPerSec,
-  thinkAutoExpand = DEFAULT_STREAM_SETTINGS.thinkAutoExpand,
-  logarithmicFade = DEFAULT_STREAM_SETTINGS.logarithmicFade,
-  controlScroll = true,
-  motionPreference = DEFAULT_STREAM_SETTINGS.motionPreference,
+  thinkAutoExpand = true,
   node,
   groupPart,
   useTurnData,
@@ -1021,15 +650,8 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
    * field, so it is declared here and erased at compile time.
    */
   groupPart?: 'reasoning' | 'response' | undefined
-  mode?: StreamMode
-  preset?: StreamSmoothingPreset
-  revealCharsPerSec?: number
-  scrollSpeedPxPerSec?: number
-  maxScrollSpeedPxPerSec?: number
+  /** Follow the streaming reasoning text inside the inline box. */
   thinkAutoExpand?: boolean
-  logarithmicFade?: boolean
-  controlScroll?: boolean
-  motionPreference?: StreamMotionPreference
   /** Optional reasoning-translation Remote; absent when the bundle is off. */
   translation?: ReasoningTranslationFace | undefined
   /** Human-readable translation backend shown in the toggle tooltip. */
@@ -1049,22 +671,6 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
     : groupPart === 'response'
       ? data.blocks.filter(block => block.kind !== 'reasoning')
       : data.blocks
-  // dsh 0.2.x mounts this view twice on the same conversation scrollport —
-  // the reasoning row above and the response row below. Handing the port to
-  // whichever row carries the streaming tail still left the think phase
-  // jumpy: while reasoning streamed, the reasoning-row host owned the port
-  // from a mid-transcript anchor (the empty response row and the turn status
-  // render below it), and the viewport hopped upward as the glide steered
-  // toward positions its bottom-row tuning does not describe. The response
-  // row is the geometric bottom row for the whole turn, so owning it from
-  // the first streamed block reproduces the 0.1.x single-row configuration
-  // the glide was tuned for: think growth happens above the anchor, the
-  // text reveal grows inside it, and ownership never flips mid-turn. The
-  // reasoning row never touches the port — its think box paces its own
-  // reveal and auto-scrolls internally. 0.1.x mounts a single row
-  // (groupPart undefined) and keeps the previous behavior.
-  const rowOwnsPort = groupPart !== 'reasoning'
-  const reduced = useMotionReduced(motionPreference)
   // The Host's completion-fold decision for THIS node's inline reasoning:
   // only the answer step folds, only in compact-transcript mode, and only
   // once the turn has closed (foldable implies it). Mirrors the built-in
@@ -1075,41 +681,6 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
     && turnProcess.spec.inlineReasoning
     && !turnProcess.open
   const revealProcess = useCallback(() => { turnProcess?.setOpen(true) }, [turnProcess])
-  const { ref: guardRef, shouldHoldBack } = useFpsGuard(streaming)
-  const rootSpeedRef = useRef(35)
-  const rootRevealedCharsRef = useRef(0)
-  const rootRevealScaleRef = useRef(1)
-  const previousStreamingRef = useRef(streaming)
-  const [textRevealActive, setTextRevealActive] = useState(false)
-  const completionCandidate = !streaming
-    && previousStreamingRef.current
-    && blocks.some(block => block.kind === 'text' && block.text.trim() !== '')
-  useLayoutEffect(() => {
-    previousStreamingRef.current = streaming
-  }, [streaming])
-  const updateTextRevealActivity = useCallback((active: boolean): void => {
-    setTextRevealActive(previous => previous === active ? previous : active)
-  }, [])
-  const reasoningTailIndex = streaming && blocks[blocks.length - 1]?.kind === 'reasoning'
-    ? blocks.length - 1
-    : -1
-  const reasoningOwnsSpeed = reasoningTailIndex !== -1
-  const rootPredictiveRef = useRef(false)
-  const previousReasoningTailRef = useRef(-1)
-  if (reasoningTailIndex !== previousReasoningTailRef.current) {
-    // Think growth is already paced by its own text reveal. Opening additional
-    // speculative runway here exposes that runway as an empty gap above the
-    // fixed turn status, especially when reasoning arrives in fast bursts.
-    // The follower still smooths real height growth within the measured gap
-    // and catches up any unsafe remainder in the same frame.
-    rootPredictiveRef.current = false
-    if (!reasoningOwnsSpeed) rootSpeedRef.current = 35
-    previousReasoningTailRef.current = reasoningTailIndex
-  }
-  const updateTextPrediction = useMemo(
-    () => (predictive: boolean): void => { rootPredictiveRef.current = predictive },
-    [],
-  )
   const turn = node.location.kind === 'turn' || node.location.kind === 'step'
     ? node.location.turn
     : undefined
@@ -1134,28 +705,14 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
     || data.status === 'interrupted'
     || blocks.some(block => block.kind !== 'tool-call')
   if (!hasVisible) return null
-  const announcementText = blocks
-    .filter(block => block.kind === 'text')
-    .map(block => block.text)
-    .join('\n')
   // 0.2.x reasoning rows see a blocks array filtered to reasoning only, so
   // `index === last` stays true while a later tool-call or text block runs in
-  // the same step — the disclosure then waits for the whole step to settle
-  // before snapping shut, and that late full-height collapse jumps the page.
-  // Tail-ness must be judged against the ORIGINAL step blocks: any later
-  // block of any kind closes the think box promptly, exactly as the 0.1.x
-  // single-row layout did by construction.
+  // the same step. Tail-ness must be judged against the ORIGINAL step blocks
+  // so the think box settles promptly when any later block starts.
   const stepTailIsReasoning = data.blocks[data.blocks.length - 1]?.kind === 'reasoning'
 
   const rendered: ReactNode[] = []
   const last = blocks.length - 1
-  let lastFollow = -1
-  let lastText = -1
-  for (let index = 0; index < blocks.length; index += 1) {
-    const kind = blocks[index]?.kind
-    if (kind === 'text' || kind === 'reasoning') lastFollow = index
-    if (kind === 'text') lastText = index
-  }
   for (let index = 0; index < blocks.length; index += 1) {
     const block = blocks[index]
     if (block === undefined) continue
@@ -1163,21 +720,12 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
       case 'text':
         if (!streaming && block.text.trim() === '') break
         rendered.push(
-          <AnimatedMarkdownText
+          <MarkdownText
             key={index}
             text={block.text}
+            streaming={streaming}
             labels={markdownLabels}
             fileMentions={mentions}
-            streaming={streaming}
-            logarithmicFade={logarithmicFade && data.status !== 'interrupted'}
-            motionReduced={reduced}
-            followSpeedCpsRef={index === lastFollow ? rootSpeedRef : undefined}
-            followRevealedCharsRef={index === lastFollow ? rootRevealedCharsRef : undefined}
-            followRevealScaleRef={index === lastFollow ? rootRevealScaleRef : undefined}
-            onPredictiveChange={index === lastFollow ? updateTextPrediction : undefined}
-            onRevealActivityChange={index === lastText ? updateTextRevealActivity : undefined}
-            preset={preset}
-            shouldHoldBack={shouldHoldBack}
           />,
         )
         break
@@ -1188,13 +736,7 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
               text={block.text}
               running={streaming && index === last && (groupPart !== 'reasoning' || stepTailIsReasoning)}
               turnStreaming={streaming}
-              preset={preset}
               thinkAutoExpand={thinkAutoExpand}
-              logarithmicFade={logarithmicFade && data.status !== 'interrupted'}
-              motionReduced={reduced}
-              shouldHoldBack={shouldHoldBack}
-              followSpeedCpsRef={reasoningOwnsSpeed && index === last ? rootSpeedRef : undefined}
-              followRevealScaleRef={reasoningOwnsSpeed && index === last ? rootRevealScaleRef : undefined}
               sessionId={sessionId as unknown as string | undefined}
               translation={translation}
               translationLabel={translationLabel}
@@ -1234,24 +776,11 @@ export const TypewriterAssistantNodeView = memo(function TypewriterAssistantNode
   }
 
   return (
-    <div ref={guardRef} className={css.root} data-streaming={streaming || undefined}>
-      <StreamAnnouncement text={announcementText} active={streaming && !reduced} />
-      <FollowHost
-        // The status can close before its final text arm drains. Retain this
-        // same owner across that boundary; the candidate bridges the one
-        // layout commit before the child reports its live reveal state.
-        active={!reduced && (streaming || completionCandidate || textRevealActive)}
-        speedCpsRef={rootSpeedRef}
-        revealedCharsRef={rootRevealedCharsRef}
-        revealScaleRef={rootRevealScaleRef}
-        predictiveRef={rootPredictiveRef}
-        controlScroll={controlScroll && rowOwnsPort}
-      >
-        <div className={css.body}>
-          {rendered}
-          {data.status === 'interrupted' && <span className={css.stopped}>{t('message.stopped')}</span>}
-        </div>
-      </FollowHost>
+    <div className={css.root} data-streaming={streaming || undefined}>
+      <div className={css.body}>
+        {rendered}
+        {data.status === 'interrupted' && <span className={css.stopped}>{t('message.stopped')}</span>}
+      </div>
     </div>
   )
 })

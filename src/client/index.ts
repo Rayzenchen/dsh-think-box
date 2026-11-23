@@ -10,12 +10,9 @@ import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
 import type { ChatNodeViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { claimApplyOwnership, type StandDown } from './applyOwnership.ts'
 import { TypewriterAssistantNodeView } from './TypewriterAssistantNodeView.tsx'
-import { wrapFollowNodeView, type FollowWrapProps } from './TypewriterToolNodeView.tsx'
-import { SmoothStreamCard, SmoothStreamConfigPage } from './SmoothStreamCard.tsx'
+import { SmoothStreamConfigPage } from './SmoothStreamCard.tsx'
 import { SmoothStreamCardController } from './smooth-stream-card-controller.ts'
 import { createSmoothStreamSettingsApi } from './smooth-stream-settings-api.ts'
-import { DebugPanel } from './DebugPanel.tsx'
-import { debugRuntime } from './debugRuntime.ts'
 import {
   createReasoningTranslationFace,
   type CotTranslationRemote,
@@ -31,7 +28,7 @@ import {
   type StreamConfig,
   type TranslationConfig,
 } from '../config.ts'
-import { DEFAULT_STREAM_SETTINGS, STREAM_SETTINGS_NS, type StreamDebugTuning, type StreamSettings } from '../settings.ts'
+import { DEFAULT_STREAM_SETTINGS, type StreamDebugTuning, type StreamSettings } from '../settings.ts'
 
 /**
  * Cordis services required by the browser half. Only `slots` is load-bearing
@@ -80,44 +77,8 @@ const BOOT_DEBUG_TUNING_KEYS = [
   'backpressureMinScale',
 ] as const
 
-/**
- * The assistant renderer owns its own character queue and conversation
- * follower, so wrapping it again would create two scroll owners. Human input
- * stays immediate; every Agent-owned output renderer goes through the same
- * generic follow boundary. This is deliberately keyed by the owner that
- * provides the renderer, not by individual tool names, so new Context,
- * Command, and Tool rows are covered automatically.
- *
- * Host chrome and controllers are excluded on a different rule: `turn-process`
- * (the completed-turn process summary control) and `turn-tail` (the turn usage
- * footer) are not Agent output. The Host renders them as bare controls and
- * flips their visibility itself, so wrapping them has three measured costs and
- * no benefit:
- *
- * 1. The wrapper element defeats ChatView's `.flowItem:empty { display: none }`
- *    rule. A `turn-process` renderer returns null whenever the Host's fold is
- *    unavailable (e.g. `processWindowReady === false`), and that null render is
- *    exactly what the `:empty` rule exists to erase; with a wrapper the row
- *    stays in flow and still consumes the 16px column gap, painting an empty
- *    band where the fold control should be.
- * 2. The summary label (`N tool calls · M messages`) is not streamed model
- *    text, so pushing it through the character-reveal engine is wrong by
- *    construction.
- * 3. The row would inherit the generic entrance animation (opacity + clip-path)
- *    on a row the Host may mount and hide inside a single commit.
- */
-const SKIP_WRAP = new Set([
-  'assistant-step',
-  'user',
-  'steering',
-  'command-input',
-  'turn-process',
-  'turn-tail',
-  'tool-call',
-])
-
 /** React function/class or an exotic component such as memo/forwardRef/lazy. */
-function isWrappableComponent(value: unknown): value is ComponentType<FollowWrapProps> {
+function isWrappableComponent(value: unknown): value is ComponentType<AssistantProps> {
   return typeof value === 'function'
     || (value !== null && typeof value === 'object' && '$$typeof' in value)
 }
@@ -254,52 +215,6 @@ function readTranslationConfig(raw: unknown): TranslationConfig {
 }
 
 /**
- * Wrap every Agent-owned keyed Chat row except the assistant renderer in
- * place. A second
- * register with the same `children` table throws because the child slot is
- * already declared, and only the winning entry receives `renderSlot`;
- * swapping `entry.component` keeps the original children, locale, and inject
- * seats. `assistant-step` is replaced below so text and Think use the
- * typewriter reveal. The wrapper owns only the shared layout-growth/follow
- * lifecycle; the Harness keeps each renderer's controls, disclosures, and
- * cards intact.
- * @param ctx - Browser context carrying the slot registry.
- * @returns Restorer that puts the original components back.
- */
-function wrapAgentChatRows(
-  ctx: ClientContext,
-  useControlScroll: () => boolean,
-): () => void {
-  const restores: Array<() => void> = []
-  const wrapped = new WeakSet<object>()
-
-  const wrapAll = (): void => {
-    for (const entry of ctx.slots.entries('conversation.chat.node')) {
-      const key = entry.options.key
-      if (key === undefined || SKIP_WRAP.has(key)) continue
-      const current = entry.component
-      if (!isWrappableComponent(current) || wrapped.has(current)) continue
-      const inner = current as ComponentType<FollowWrapProps>
-      const next = wrapFollowNodeView(inner, useControlScroll)
-      wrapped.add(next)
-      entry.component = next
-      restores.push(() => {
-        if (entry.component === next) entry.component = inner
-      })
-    }
-  }
-
-  wrapAll()
-  const off = ctx.on('slots/changed', (key: string) => {
-    if (key === 'conversation.chat.node') wrapAll()
-  })
-  return () => {
-    off()
-    for (const restore of restores) restore()
-  }
-}
-
-/**
  * A live settings cell shared by the renderer lifecycle and React views. It
  * starts on the Host's boot snapshot (the resolved profile config read through
  * the volatile references at Host apply time) and follows the plugin-owned
@@ -378,16 +293,7 @@ class SettingsCell {
   }
 }
 
-/**
- * The optional reasoning-translation Remote shared by every think box.
- *
- * The bundled `@deepseek-ai/dsh-experimental-client-ui-cot-translation` client
- * mounts `remote.cotTranslation`; the takeover renderer never renders that
- * plugin's reasoning-body slot, so the toggle in the think box drives the same
- * Host Remote directly. The face stays undefined until the bundle's client
- * half is mounted and back to undefined when it unloads, which is what hides
- * the toggle again.
- */
+
 /**
  * Register the typewriter renderer after the conversation package declares the
  * keyed Chat node seat. A lower priority shadows the built-in assistant row;
@@ -432,12 +338,6 @@ export function apply(ctx: ClientContext): void {
     }
     throw new Error('translation settings are not connected')
   }
-  const useControlScroll = (): boolean => useSyncExternalStore(
-    settings.subscribe,
-    () => settings.getSnapshot().controlScroll,
-    () => settings.getSnapshot().controlScroll,
-  )
-
   // Translation backends. `llm` talks to this plugin's Host bridge, which
   // forwards to any registered Harness route; `bundle` uses the official
   // reasoning-translation bundle's Host Remote. Both faces stay attached, and
@@ -544,24 +444,6 @@ export function apply(ctx: ClientContext): void {
       translationBridge,
     )
     const detachSettings = settings.attach(card)
-    const syncDebug = (): void => {
-      const snapshot = card.getSnapshot()
-      debugRuntime.syncSettings({
-        available: snapshot.debugAvailable,
-        enabled: snapshot.debugEnabled,
-        writable: snapshot.writable && !snapshot.saving,
-        dirty: snapshot.dirty,
-        status: snapshot.status,
-        tuning: snapshot.debugTuning,
-      })
-    }
-    const detachBinding = debugRuntime.bindSettings({
-      edit: patch => { card.inject().edit(patch) },
-      save: () => { card.inject().save() },
-      discard: () => { card.inject().discard() },
-    })
-    const detachDebug = card.subscribe(syncDebug)
-    syncDebug()
     card.start()
     settingsCtx.effect(() => settingsCtx.locale.register(SETTINGS_NS, { zh, en }), 'dsh-smooth-stream: settings dictionaries')
     // Configuration page, 0.2.1+: plugin configuration moved out of Settings
@@ -576,32 +458,9 @@ export function apply(ctx: ClientContext): void {
       locale: SETTINGS_NS,
       inject: () => card.inject(),
     } as never, SmoothStreamConfigPage as never))
-    // Configuration card, up to 0.2.0: the Web Settings "plugin configuration"
-    // page. Kept so the fork still renders on the Harness generation it was
-    // forked from; the slot never appears on 0.2.1+, where `slots.inject`
-    // simply waits forever.
-    settingsCtx.slots.inject('settings.plugin.item', () => settingsCtx.slots.register({
-      name: 'settings.plugin.item',
-      id: 'smooth-stream',
-      key: STREAM_SETTINGS_NS,
-      order: 30,
-      locale: SETTINGS_NS,
-      inject: () => card.inject(),
-    // Older Harness declares this slot as a list (`id`); newer Harness uses a
-    // keyed slot filtered by the Host settings namespace (`key`).
-    } as never, SmoothStreamCard))
-    settingsCtx.slots.inject('conversation.session.header.utilities', () => settingsCtx.slots.register({
-      name: 'conversation.session.header.utilities',
-      id: 'smooth-stream-debug',
-      order: 40,
-      locale: SETTINGS_NS,
-      inject: () => debugRuntime.panelFace(),
-    }, DebugPanel))
     return () => {
       card.stop()
-      detachDebug()
       detachSettings()
-      detachBinding()
     }
   }))
 
@@ -624,99 +483,124 @@ export function apply(ctx: ClientContext): void {
       // locale service never arrived (renderer then receives the prop it
       // already had).
       ...(assistantT === undefined ? {} : { t: assistantT }),
-      mode: config.mode,
-      // Loaded settings hold the resolved preset (user layer over the install
-      // config), so they own the prop. Without them — no settings service, a
-      // failed load, or the frames before the first read lands — the shared
-      // client default is NOT an authority on the installed preset; the boot
-      // config is.
-      preset: settings.ready() ? preferences.preset ?? config.preset : config.preset,
-      revealCharsPerSec: config.revealCharsPerSec,
-      scrollSpeedPxPerSec: config.scrollSpeedPxPerSec,
-      maxScrollSpeedPxPerSec: config.maxScrollSpeedPxPerSec,
+      // The body is rendered by the Harness primitives now; only the reasoning
+      // box keeps a live preference (whether it follows its own stream).
       thinkAutoExpand: preferences.thinkAutoExpand,
-      logarithmicFade: preferences.logarithmicFade,
-      controlScroll: preferences.controlScroll,
-      motionPreference: preferences.motionPreference,
       translation: translationSnapshot.face,
       translationLabel: translationSnapshot.label,
       autoTranslate: translationSnapshot.settings.autoTranslate,
     })
   }
   keep(ctx.slots.inject('conversation.chat.node', () => {
-    let releaseTakeover: (() => void) | undefined
-    let usedSwap = false
+    // dsh 0.2.x renders every keyed `conversation.chat.node` entry as its own
+    // seat, so a lower-priority registration no longer shadows the built-in
+    // assistant row - the same assistant step would then render twice. Swap the
+    // built-in entry's component in place instead; that keeps its children,
+    // locale, and inject seats. Only the assistant step needs replacing: the
+    // reasoning box rides on that row, and no other chat row is touched.
+    let taken: { entry: { component: unknown }; original: unknown } | undefined
+    let releaseFallback: (() => void) | undefined
+    // Slot registration emits `slots/changed` synchronously from inside the
+    // registration itself. Without this guard the handler re-enters while the
+    // first call is still between "decide to register" and "remember the
+    // disposer", and the fallback gets registered twice (SlotCore rejects the
+    // duplicate at the same priority).
+    let syncing = false
 
-    const syncTakeover = (): void => {
-      if (!settings.takeoverEnabled()) {
-        releaseTakeover?.()
-        releaseTakeover = undefined
-        return
+    const findBuiltin = (): { component: unknown } | undefined => ctx.slots.entries('conversation.chat.node').find(
+      entry => entry.options.key === 'assistant-step'
+        // The pinned SlotOptions type predates `registrant`; every current
+        // runtime carries it (see the register spread in the slots package).
+        && (entry.options as { registrant?: string }).registrant !== 'dsh-smooth-stream'
+        && entry.component !== configured,
+    )
+
+    const entryPresent = (entry: { component: unknown }): boolean =>
+      (ctx.slots.entries('conversation.chat.node') as unknown[]).includes(entry)
+
+    /**
+     * Drop whatever takeover this instance owns.
+     * @param restore - put the built-in component back when this instance still
+     * owns the entry; a component installed by someone else is never clobbered.
+     */
+    const release = (restore: boolean): void => {
+      if (releaseFallback !== undefined) {
+        releaseFallback()
+        releaseFallback = undefined
       }
-      if (releaseTakeover !== undefined) return
-      const unwrap = wrapAgentChatRows(ctx, useControlScroll)
-      // dsh 0.2.x renders every keyed entry of `conversation.chat.node` as
-      // its own seat, so a lower-priority registration no longer shadows the
-      // built-in assistant row — the same assistant step then renders twice
-      // (built-in + takeover), duplicating every reasoning block in the
-      // transcript. Swap the built-in entry's component in place instead,
-      // exactly like the other keyed rows below; this keeps the original
-      // children, locale, and inject seats on every kernel generation. The
-      // shadow registration survives only as a fallback for compositions
-      // that declare no built-in assistant row to swap.
-      const builtin = ctx.slots.entries('conversation.chat.node').find(
-        entry => entry.options.key === 'assistant-step'
-          // The pinned SlotOptions type predates `registrant`; every current
-          // runtime carries it (see the register spread in the slots package).
-          && (entry.options as { registrant?: string }).registrant !== 'dsh-smooth-stream'
-          && entry.component !== configured,
-      )
-      let unshadow: () => void
-      if (builtin !== undefined && isWrappableComponent(builtin.component)) {
-        usedSwap = true
-        const inner = builtin.component as ComponentType<FollowWrapProps>
-        builtin.component = configured
-        unshadow = () => {
-          if (builtin.component === configured) builtin.component = inner
-        }
-      } else {
-        unshadow = ctx.slots.register({
-          name: 'conversation.chat.node',
-          key: 'assistant-step',
-          priority: -100,
-          // `conversation` (not `chat`): it is the namespace the pinned Harness
-          // actually registers, so it is the one whose keys must keep resolving.
-          // The layered `t` handed to the renderer covers what this namespace
-          // does not own. A namespace the composition does not declare would
-          // degrade every `t()` call to its raw key.
-          locale: 'conversation',
-          registrant: 'dsh-smooth-stream',
-        }, configured)
-      }
-      releaseTakeover = () => {
-        // Stop observing slot changes before the takeover is removed.
-        unwrap()
-        unshadow()
+      if (taken !== undefined) {
+        if (restore && taken.entry.component === configured) taken.entry.component = taken.original
+        taken = undefined
       }
     }
 
-    // If the shadow fallback was taken because the built-in assistant row
-    // had not registered yet, re-take through the in-place swap as soon as
-    // it appears, so 0.2.x never renders the row twice.
+    const takeOver = (): void => {
+      const builtin = findBuiltin()
+      if (builtin !== undefined && isWrappableComponent(builtin.component)) {
+        taken = { entry: builtin, original: builtin.component }
+        builtin.component = configured as never
+        return
+      }
+      // Shadow registration survives only as the fallback for compositions
+      // that declare no built-in assistant row to swap.
+      releaseFallback = ctx.slots.register({
+        name: 'conversation.chat.node',
+        key: 'assistant-step',
+        priority: -100,
+        // `conversation` (not `chat`): it is the namespace the pinned Harness
+        // actually registers, so it is the one whose keys must keep resolving.
+        // The layered `t` handed to the renderer covers what this namespace
+        // does not own. A namespace the composition does not declare would
+        // degrade every `t()` call to its raw key.
+        locale: 'conversation',
+        registrant: 'dsh-smooth-stream',
+      }, configured as never)
+    }
+
+    const syncTakeover = (): void => {
+      if (syncing) return
+      syncing = true
+      try {
+        syncTakeoverUnsafe()
+      } finally {
+        syncing = false
+      }
+    }
+
+    const syncTakeoverUnsafe = (): void => {
+      if (!settings.takeoverEnabled()) {
+        release(true)
+        return
+      }
+      if (taken !== undefined) {
+        // Keep the swap while this instance still owns the live entry. A slot
+        // re-registration in the same tick detaches the old entry; release it
+        // without restoring (the new entry never held our component) and take
+        // the fresh built-in row instead.
+        if (entryPresent(taken.entry) && taken.entry.component === configured) return
+        release(false)
+      } else if (releaseFallback !== undefined) {
+        // Fallback is live: migrate to the in-place swap as soon as the
+        // built-in assistant row appears, so 0.2.x never renders it twice.
+        if (findBuiltin() === undefined) return
+        release(false)
+      }
+      takeOver()
+    }
+
     const offSlotChange = ctx.on('slots/changed', (key: string) => {
-      if (key !== 'conversation.chat.node' || usedSwap || releaseTakeover === undefined) return
-      if (!settings.takeoverEnabled()) return
-      releaseTakeover()
-      releaseTakeover = undefined
+      if (key !== 'conversation.chat.node') return
       syncTakeover()
     })
-
     const unsubscribe = settings.subscribe(syncTakeover)
     syncTakeover()
     return () => {
       unsubscribe()
       offSlotChange()
-      releaseTakeover?.()
+      // Dispose must restore the built-in row even though no slot change
+      // follows: leaving `entry.component` pointing at the dead instance made
+      // the row render nothing after a plugin reload.
+      release(true)
     }
   }))
 

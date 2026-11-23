@@ -8,16 +8,14 @@
  * tail length, and a flush-speed settle drain once the input idles. The
  * reveal decision is the pure {@link computeRevealStep} for unit tests.
  *
- * `shouldHoldBack` is the performance guard's veto: while it returns true the
- * loop keeps measuring but skips the DOM commit, so an offscreen reply never
- * competes with visible frames when the frame rate is degraded.
+ * This fork keeps only the `balanced` cadence: the body reveal engine was
+ * removed, so the hook now drives the reasoning box alone.
  */
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { DEFAULT_STREAM_DEBUG_TUNING, type StreamDebugTuning } from '../settings.ts'
-import { debugRuntime } from './debugRuntime.ts'
 
-export type StreamSmoothingPreset = 'realtime' | 'balanced' | 'silky'
+/** Kept as a named type for callers; the fork ships only the balanced cadence. */
+export type StreamSmoothingPreset = 'balanced'
 
 export interface StreamSmoothingPresetConfig {
   readonly activeInputWindowMs: number
@@ -50,36 +48,6 @@ export const PRESET_CONFIG: Record<StreamSmoothingPreset, StreamSmoothingPresetC
     settleDrainMaxMs: 420,
     settleDrainMinMs: 120,
     targetBufferMs: 40,
-  },
-  realtime: {
-    activeInputWindowMs: 140,
-    defaultCps: 120,
-    emaAlpha: 0.45,
-    flushCps: 240,
-    largeAppendChars: 180,
-    maxActiveCps: 480,
-    maxCps: 320,
-    maxFlushCps: 640,
-    minCps: 32,
-    settleAfterMs: 200,
-    settleDrainMaxMs: 280,
-    settleDrainMinMs: 100,
-    targetBufferMs: 24,
-  },
-  silky: {
-    activeInputWindowMs: 280,
-    defaultCps: 64,
-    emaAlpha: 0.28,
-    flushCps: 140,
-    largeAppendChars: 100,
-    maxActiveCps: 280,
-    maxCps: 180,
-    maxFlushCps: 400,
-    minCps: 20,
-    settleAfterMs: 360,
-    settleDrainMaxMs: 520,
-    settleDrainMinMs: 160,
-    targetBufferMs: 56,
   },
 }
 
@@ -119,14 +87,13 @@ export function computeAdaptiveQueueStep(
   dtMs: number,
   debt: number,
   revealScale = 1,
-  tuning: StreamDebugTuning = DEFAULT_STREAM_DEBUG_TUNING,
 ): AdaptiveQueueStep {
   if (backlog <= 0 || dtMs <= 0) return { revealChars: 0, debt: 0, speedCps: 0 }
   const speedCps = Math.min(
-    tuning.maxRevealCps,
-    QUEUE_BASE_SPEED_CPS + Math.pow(backlog, QUEUE_ACCEL_EXPONENT) * tuning.queuePressure,
+    QUEUE_MAX_SPEED_CPS,
+    QUEUE_BASE_SPEED_CPS + Math.pow(backlog, QUEUE_ACCEL_EXPONENT) * QUEUE_PRESSURE_FACTOR,
   )
-  const effectiveScale = clamp(revealScale * tuning.revealScale, 0.05, 2)
+  const effectiveScale = clamp(revealScale, 0.05, 2)
   const accumulated = Math.max(0, debt) + speedCps * effectiveScale * (dtMs / 1000)
   const revealChars = Math.min(backlog, Math.floor(accumulated))
   return { revealChars, debt: revealChars >= backlog ? 0 : accumulated - revealChars, speedCps }
@@ -256,9 +223,6 @@ export interface UseSmoothStreamContentOptions {
   enabled?: boolean
   /** The producer has completed; drain queued text without live backpressure. */
   inputComplete?: boolean
-  preset?: StreamSmoothingPreset
-  /** Performance guard veto: while true, reveal commits are held back. */
-  shouldHoldBack?: (() => boolean) | undefined
   /**
    * Fixed reveal rate in chars/s. When set, the reveal runs at this steady
    * pace while the input streams (instead of tracking the arrival rate) and
@@ -289,16 +253,14 @@ export interface UseSmoothStreamContentOptions {
  * Smooth a chunked content stream into a reveal-paced display string.
  *
  * @param content - The full accumulated input so far.
- * @param options - Preset, guard, and steady-rate wiring.
- * @returns The displayed content, revealed at the smoothed cadence.
+ * @param options - Steady-rate wiring.
+ * @returns The displayed content, revealed at the balanced cadence.
  */
 export function useSmoothStreamContent(
   content: string,
   {
     enabled = true,
     inputComplete = false,
-    preset = 'balanced',
-    shouldHoldBack,
     steadyCps,
     defaultCps,
     speedCpsRef,
@@ -307,7 +269,7 @@ export function useSmoothStreamContent(
     onRevealCommit,
   }: UseSmoothStreamContentOptions = {},
 ): string {
-  const config = PRESET_CONFIG[preset]
+  const config = PRESET_CONFIG.balanced
   const seedCps = defaultCps ?? config.defaultCps
   // A fast provider can fill the first Host render with a large batch. Start
   // an enabled stream behind that batch so it still enters the reveal queue;
@@ -332,7 +294,6 @@ export function useSmoothStreamContent(
   const queueDebtRef = useRef(0)
   const settleCpsRef = useRef<number | null>(null)
   const lastDrainCpsRef = useRef(0)
-  const holdBackRef = useRef(shouldHoldBack)
   const speedOutRef = useRef(speedCpsRef)
   speedOutRef.current = speedCpsRef
   const revealedCharsOutRef = useRef(revealedCharsRef)
@@ -343,11 +304,6 @@ export function useSmoothStreamContent(
   onRevealCommitOutRef.current = onRevealCommit
   const inputCompleteRef = useRef(inputComplete)
   inputCompleteRef.current = inputComplete
-  const streamIdRef = useRef(`stream-${Math.random().toString(36).slice(2)}`)
-
-  useEffect(() => {
-    holdBackRef.current = shouldHoldBack
-  }, [shouldHoldBack])
 
   const stopFrameLoop = useCallback(() => {
     if (rafRef.current !== null) {
@@ -408,7 +364,6 @@ export function useSmoothStreamContent(
         settleCpsRef.current = null
         const speedOut = speedOutRef.current
         if (speedOut !== undefined) speedOut.current = seedCps
-        debugRuntime.reportStream(streamIdRef.current, null)
         stopFrameLoop()
         return
       }
@@ -425,7 +380,6 @@ export function useSmoothStreamContent(
 
       const idleMs = now - lastInputTsRef.current
       const producerComplete = inputCompleteRef.current
-      const debugTuning = debugRuntime.activeTuning()
       const inputActive = !producerComplete && idleMs <= config.activeInputWindowMs
       const settling = producerComplete || (!inputActive && idleMs >= config.settleAfterMs)
       if (!producerComplete) settleCpsRef.current = null
@@ -466,7 +420,7 @@ export function useSmoothStreamContent(
           },
           dtSeconds,
         )
-        revealChars = Math.min(Math.round(step.revealChars * debugTuning.revealScale), backlog)
+        revealChars = Math.min(Math.round(step.revealChars), backlog)
         revealSpeedCps = frameIntervalMs > 0 ? (revealChars * 1000) / frameIntervalMs : 0
       } else {
         const step = computeAdaptiveQueueStep(
@@ -474,28 +428,10 @@ export function useSmoothStreamContent(
           frameIntervalMs,
           queueDebtRef.current,
           revealScaleOutRef.current?.current ?? 1,
-          debugTuning,
         )
         revealChars = step.revealChars
         revealSpeedCps = step.speedCps
         nextQueueDebt = step.debt
-      }
-
-      debugRuntime.reportStream(streamIdRef.current, {
-        backlog,
-        speedCps: revealSpeedCps,
-        targetChars: targetCount,
-        displayedChars: displayedCount,
-        active: !producerComplete || backlog > 0,
-        producerComplete,
-      })
-
-      // Performance guard: while degraded and the reply is offscreen, skip
-      // the DOM commit — the backlog keeps accumulating and flushes when the
-      // guard clears or the reply scrolls into view.
-      if (holdBackRef.current?.() === true) {
-        rafRef.current = requestAnimationFrame(tick)
-        return
       }
 
       queueDebtRef.current = nextQueueDebt
@@ -590,7 +526,6 @@ export function useSmoothStreamContent(
   useEffect(() => {
     return () => {
       stopFrameLoop()
-      debugRuntime.reportStream(streamIdRef.current, null)
     }
   }, [stopFrameLoop])
 

@@ -327,15 +327,12 @@ it.each(['text', 'reasoning'])('integrates with real %s and clears on interrupti
   expect(ranges()).toHaveLength(0)
 })
 
-it('bypasses reduced motion, disabled fade and history', () => {
+it('bypasses history when the text is already settled', () => {
+  // R1a removed the fade toggle, so the only remaining bypass exercised here is
+  // restored history. Reduced-motion coverage moves to the reasoning-box suite
+  // once the renderer's new prop surface lands (R1c).
   const blocks = [{ kind: 'text', text: '历史消息' }]
-  const view = render(<TypewriterAssistantNodeView {...assistantProps(blocks, 'settled')} />)
+  render(<TypewriterAssistantNodeView {...assistantProps(blocks, 'settled')} />)
   expect(ranges()).toHaveLength(0)
   expect(registry.size).toBe(0)
-  view.rerender(<TypewriterAssistantNodeView {...assistantProps(blocks)} motionPreference="force-reduced" />)
-  tick(96)
-  expect(ranges()).toHaveLength(0)
-  view.rerender(<TypewriterAssistantNodeView {...assistantProps(blocks)} logarithmicFade={false} />)
-  tick(96)
-  expect(ranges()).toHaveLength(0)
 })

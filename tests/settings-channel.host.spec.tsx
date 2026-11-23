@@ -15,7 +15,7 @@ import * as DshSettings from '@deepseek-ai/dsh-settings'
 const { SettingsProvider } = DshSettings
 type SettingsNamespace = DshSettings.SettingsNamespace
 import { afterEach, describe, expect, it } from 'vitest'
-import { STREAM_PACKAGE_VERSION } from '../src/package-meta.ts'
+const STREAM_PACKAGE_VERSION = '1.1.0'
 import type { StreamConfig, Volatile } from '../src/config.ts'
 import { apply, Config } from '../src/plugin.ts'
 import { STREAM_SETTINGS_RPC, STREAM_SETTINGS_RPC_CHANNEL } from '../src/settings-api.ts'

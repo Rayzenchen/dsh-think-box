@@ -348,8 +348,19 @@ export function apply(ctx: Context, config: Config): void {
   let mounted = false
   const mountChannel = (mountCtx: Context): void => {
     if (mounted) return
+    // A fiber that can see `connection` but not `webServer` (the usual
+    // 0.2.x split) throws out of the registration attempt. Only a successful
+    // mount may claim the slot: otherwise the other inject fiber - the one
+    // that can actually reach the web server - would be skipped and the card
+    // would stay unreachable for the whole session.
+    let dispose: () => void
+    try {
+      dispose = registerSettingsChannel(mountCtx, THINK_BOX_SETTINGS_RPC_CHANNEL, handle)
+    } catch (error) {
+      console.warn('[dsh-think-box] settings channel could not mount on this fiber; trying another', error)
+      return
+    }
     mounted = true
-    const dispose = registerSettingsChannel(mountCtx, THINK_BOX_SETTINGS_RPC_CHANNEL, handle)
     mountCtx.effect(() => () => {
       mounted = false
       dispose()

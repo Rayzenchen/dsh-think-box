@@ -46,6 +46,27 @@ type AssistantProps = ChatNodeViewProps<'assistant-step'>
 const STREAM_MODES: readonly string[] = ['typewriter', 'teleprompter']
 const STREAM_PRESETS: readonly string[] = ['realtime', 'balanced', 'silky']
 
+/**
+ * Preference keys the pre-0.2.2-independent Host build did not put in the boot
+ * global. `preset` is excluded on purpose: it existed as a core engine field
+ * before it became a preference, so its presence cannot distinguish the builds.
+ */
+const BOOT_PREFERENCE_KEYS = [
+  'enabled',
+  'controlScroll',
+  'motionPreference',
+  'thinkAutoExpand',
+  'logarithmicFade',
+  'debugEnabled',
+  'debugTuning',
+] as const
+
+/** Whether any preference-snapshot field is present in a boot global value. */
+function hasPreferenceSnapshotFields(raw: unknown): boolean {
+  if (typeof raw !== 'object' || raw === null) return false
+  return BOOT_PREFERENCE_KEYS.some(key => key in (raw as Record<string, unknown>))
+}
+
 /** Numeric fields the boot snapshot must carry for the diagnostics panel. */
 const BOOT_DEBUG_TUNING_KEYS = [
   'revealScale',
@@ -116,7 +137,10 @@ function readBootConfig(): StreamConfig {
     console.info('[dsh-smooth-stream] no host config bridge; using defaults')
     return DEFAULT_STREAM_CONFIG
   }
-  const snapshot = readSettingsSnapshot(raw)
+  const malformed = (): Error =>
+    new Error(`[dsh-smooth-stream] malformed ${STREAM_BOOT_GLOBAL} boot global: ${JSON.stringify(raw)}`)
+  // Core engine fields are load-bearing: a bad one means the two halves really
+  // disagree, and rendering from it would be worse than failing loudly.
   if (
     typeof raw !== 'object' || raw === null
     || !STREAM_MODES.includes((raw as StreamConfig).mode)
@@ -124,11 +148,29 @@ function readBootConfig(): StreamConfig {
     || typeof (raw as StreamConfig).revealCharsPerSec !== 'number'
     || typeof (raw as StreamConfig).scrollSpeedPxPerSec !== 'number'
     || typeof (raw as StreamConfig).maxScrollSpeedPxPerSec !== 'number'
-    || snapshot === undefined
   ) {
-    throw new Error(`[dsh-smooth-stream] malformed ${STREAM_BOOT_GLOBAL} boot global: ${JSON.stringify(raw)}`)
+    throw malformed()
   }
-  return { ...raw as StreamConfig, translation: readTranslationConfig((raw as { translation?: unknown }).translation) }
+  const snapshot = readSettingsSnapshot(raw)
+  if (snapshot === undefined && hasPreferenceSnapshotFields(raw)) {
+    // The preferences are present but malformed: this is a real disagreement.
+    throw malformed()
+  }
+  if (snapshot === undefined) {
+    // Build window: this client bundle can be served by the Host build that
+    // loaded before the preference snapshot was added (new lib on disk, old
+    // process still serving its boot HTML). Fall back to the shared defaults
+    // instead of breaking a page refresh; the card RPC then loads live values.
+    console.warn(
+      `[dsh-smooth-stream] ${STREAM_BOOT_GLOBAL} predates the preference snapshot `
+      + '(Host process not restarted yet?); using default preferences until it is',
+    )
+  }
+  return {
+    ...DEFAULT_STREAM_CONFIG,
+    ...raw as StreamConfig,
+    translation: readTranslationConfig((raw as { translation?: unknown }).translation),
+  } as StreamConfig
 }
 
 /**

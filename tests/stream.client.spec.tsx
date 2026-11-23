@@ -3391,6 +3391,41 @@ describe('client plugin lifecycle', () => {
     await vi.waitFor(() => expect(container.querySelector('strong')?.textContent).toBe('hello'))
   })
 
+  it('tolerates a Host build that predates the preference snapshot', async () => {
+    // Build window: the new client bundle is on disk while the running Host
+    // process still serves boot HTML from the previous build, which carries the
+    // core engine fields only. A page refresh must render (defaults apply) and
+    // the card RPC later loads the live values; only a *present but malformed*
+    // snapshot is a hard error.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const legacy = {
+      mode: 'typewriter',
+      preset: 'balanced',
+      revealCharsPerSec: 80,
+      scrollSpeedPxPerSec: 48,
+      maxScrollSpeedPxPerSec: 1000,
+      translation: DEFAULT_STREAM_CONFIG.translation,
+    }
+    try {
+      ;(globalThis as Record<string, unknown>)[STREAM_BOOT_GLOBAL] = legacy
+      const container = await renderRegisteredView(assistantProps('running', [
+        { kind: 'text', text: '**hello**' },
+      ]))
+      expect(container.querySelector(`.${css.follow}`)).not.toBeNull()
+      await vi.waitFor(() => expect(container.querySelector('strong')?.textContent).toBe('hello'))
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('predates the preference snapshot'))
+
+      // Present-but-broken preferences stay a loud failure, not a silent default.
+      ;(globalThis as Record<string, unknown>)[STREAM_BOOT_GLOBAL] = { ...legacy, enabled: 'yes' }
+      await expect(renderRegisteredView(assistantProps('running', [
+        { kind: 'text', text: 'hello' },
+      ]))).rejects.toThrow(/malformed/)
+    } finally {
+      delete (globalThis as Record<string, unknown>)[STREAM_BOOT_GLOBAL]
+      warn.mockRestore()
+    }
+  })
+
   it('fails loudly on a malformed boot global', async () => {
     ;(globalThis as Record<string, unknown>)[STREAM_BOOT_GLOBAL] = { mode: 'diagonal' }
     await expect(renderRegisteredView(assistantProps('running', [

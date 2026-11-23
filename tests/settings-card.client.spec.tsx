@@ -280,6 +280,30 @@ describe('reasoning settings card', () => {
     expect(screen.queryByRole('button', { name: new RegExp(en.translationRoute) })).toBeNull()
   })
 
+  it('reuses one injected face and never reloads the catalog on staged edits', async () => {
+    const { face, screen, bench } = await renderCard({
+      translation: { backend: 'llm', provider: 'alpha', model: 'm1', reasoningEffort: 'low' },
+    })
+    await waitFor(() => expect(face.hooks.translationCard.getSnapshot().status).toBe('ready'))
+    const firstFace = cardFace(bench.slots)
+    firstFace.edit({ enabled: false })
+    expect(cardFace(bench.slots)).toBe(firstFace)
+
+    await waitFor(() => expect(
+      screen.getByRole('button', { name: new RegExp(en.translationRoute) }).textContent,
+    ).toContain('Alpha Provider'))
+    const catalogCalls = (): number => bench.call.mock.calls
+      .filter(call => call[0] === TRANSLATION_RPC_CHANNEL && call[1] === TRANSLATION_RPC.catalog)
+      .length
+    await waitFor(() => expect(catalogCalls()).toBe(1))
+    const trigger = screen.getByRole('button', { name: new RegExp(en.translationRoute) })
+    fireEvent.click(trigger)
+    fireEvent.click(screen.getByText(en.translationModel))
+    fireEvent.click(screen.getByText('Model Two'))
+    await waitFor(() => expect(face.hooks.translationCard.getSnapshot().dirty).toBe(true))
+    expect(catalogCalls()).toBe(1)
+  })
+
   it('saves a route picked from the catalog through the channel Save', async () => {
     const { face, screen, bench } = await renderCard({
       translation: { backend: 'llm', provider: 'alpha', model: 'm1', reasoningEffort: 'low' },

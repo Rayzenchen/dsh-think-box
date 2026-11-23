@@ -123,11 +123,16 @@ export function TranslationModelPicker({
   const [rect, setRect] = useState<{ left: number, top: number, width: number, height: number } | undefined>(undefined)
   const triggerRef = useRef<HTMLButtonElement | null>(null)
   const cardRef = useRef<HTMLDivElement | null>(null)
+  // The parent re-renders on every staged edit and may hand down a new
+  // callback identity. Reading it through a ref keeps the catalog load keyed
+  // by the backend/reload attempt, not by the parent's render cycle.
+  const loadCatalogRef = useRef(loadCatalog)
+  loadCatalogRef.current = loadCatalog
   const id = useId()
 
   const load = useCallback((signal: AbortSignal): void => {
     setStatus('loading')
-    void loadCatalog(signal).then((next) => {
+    void loadCatalogRef.current(signal).then((next) => {
       if (signal.aborted) return
       setCatalog(next)
       setStatus('ready')
@@ -135,7 +140,7 @@ export function TranslationModelPicker({
       if (signal.aborted) return
       setStatus('error')
     })
-  }, [loadCatalog])
+  }, [])
 
   useEffect(() => {
     if (backend !== 'llm') return

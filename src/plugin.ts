@@ -266,19 +266,35 @@ export function apply(ctx: Context, config: Config): void {
       'dsh-think-box: boot config bridge',
     )
   })
+  // The LLM service can live in a fiber the web-server child cannot resolve
+  // (0.2.x looks services up per injection scope). Capture the handle from its
+  // own injection and share it with both the translator and the catalog reader;
+  // the web-server child lookup stays as a fallback for compositions where the
+  // service mounts later.
+  let llmHandle: LlmServiceLike | undefined
+  ctx.inject(['llm'], (llmCtx) => {
+    llmHandle = llmCtx.get('llm') as unknown as LlmServiceLike | undefined
+    return () => { llmHandle = undefined }
+  })
   // Opt-in LLM translation bridge: any registered Harness route can translate
   // the think box (for example a free OpenAI-compatible provider). The route is
   // resolved per request, so a changed catalog reaches the next translation
   // without restarting; only the backend choice itself needs a reload.
   const translationStore = createTranslationSettingsStore(config.translation)
   ctx.inject(['webServer'], (translateCtx) => {
+    const resolveLlm = (): LlmServiceLike | undefined => {
+      if (llmHandle !== undefined) return llmHandle
+      try {
+        return translateCtx.get('llm') as unknown as LlmServiceLike | undefined
+      } catch {
+        return undefined
+      }
+    }
     const route = createLlmTranslationRoute(
       () => translationStore.snapshot(),
-      () => translateCtx.get('llm') as unknown as LlmServiceLike | undefined,
+      resolveLlm,
     )
-    const catalog = createTranslationCatalogReader(
-      () => translateCtx.get('llm') as unknown as LlmServiceLike | undefined,
-    )
+    const catalog = createTranslationCatalogReader(resolveLlm)
     registerSettingsChannel(
       translateCtx,
       TRANSLATION_RPC_CHANNEL,

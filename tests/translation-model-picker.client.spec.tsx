@@ -174,6 +174,39 @@ describe('translation model picker', () => {
     expect(screen.queryByRole('button', { name: new RegExp(en.translationRoute) })).toBeNull()
   })
 
+  it('loads the catalog once even when the parent hands down new callbacks', async () => {
+    const firstLoad = vi.fn(async () => catalog)
+    const view = render(
+      <TranslationModelPicker
+        t={t}
+        provider="alpha"
+        model="m1"
+        reasoningEffort="low"
+        backend="llm"
+        disabled={false}
+        loadCatalog={firstLoad}
+        onSelect={() => {}}
+      />,
+    )
+    await waitFor(() => expect(trigger().textContent).toContain('Model One'))
+    const secondLoad = vi.fn(async () => catalog)
+    view.rerender(
+      <TranslationModelPicker
+        t={t}
+        provider="alpha"
+        model="m1"
+        reasoningEffort="low"
+        backend="llm"
+        disabled={false}
+        loadCatalog={secondLoad}
+        onSelect={() => {}}
+      />,
+    )
+    await waitFor(() => expect(trigger().textContent).toContain('Model One'))
+    expect(firstLoad).toHaveBeenCalledTimes(1)
+    expect(secondLoad).not.toHaveBeenCalled()
+  })
+
   it('closes with Escape and never stages a write by itself', async () => {
     const { onSelect } = probe()
     await waitFor(() => expect(trigger().textContent).toContain('Alpha Provider'))

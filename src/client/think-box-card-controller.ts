@@ -72,6 +72,13 @@ export class ThinkBoxCardController {
   private translationFailed = false
   private translationStatus: 'loading' | 'ready' | 'unavailable' = 'loading'
   private translationGeneration = 0
+  /**
+   * The injected face is stable for the controller's lifetime. The settings
+   * slot calls `inject()` on every parent render; returning a fresh object each
+   * time would feed new callback identities down the tree (and make the model
+   * picker reload its catalog on any staged edit).
+   */
+  private face: ThinkBoxCardFace | undefined
 
   constructor(
     private readonly api: ThinkBoxSettingsApi,
@@ -104,9 +111,10 @@ export class ThinkBoxCardController {
     return this.store.subscribe(listener)
   }
 
-  /** Build the face consumed by the settings slot renderer. */
+  /** Build (once) the face consumed by the settings slot renderer. */
   inject(): ThinkBoxCardFace {
-    return {
+    if (this.face !== undefined) return this.face
+    const face: ThinkBoxCardFace = {
       hooks: { thinkBoxCard: this.store, translationCard: this.translationStore },
       edit: (patch) => {
         if (this.saving) return
@@ -148,6 +156,8 @@ export class ThinkBoxCardController {
         return await this.translation.catalog(signal)
       },
     }
+    this.face = face
+    return face
   }
 
   private projection(): ThinkBoxCardState {

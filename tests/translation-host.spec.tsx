@@ -362,3 +362,29 @@ describe('translation catalog', () => {
     })
   })
 })
+
+
+describe('empty reasoning effort', () => {
+  it('is forwarded as the provider default instead of a level', async () => {
+    const signature = vi.fn(async (config: { reasoningEffort?: string | undefined }) => ({
+      config: { ...config },
+      stream: () => streamOf(textOf('译文')),
+    }))
+    const llm: LlmServiceLike = {
+      listProviders: () => [{ id: 'opencode-go' }],
+      listModels: async () => [{ id: 'deepseek-v4.1-flash' }],
+      prepareCall: signature,
+    }
+    const route = createLlmTranslationRoute(() => ({ ...CONFIG, reasoningEffort: '' }), () => llm)
+    const signal = new AbortController().signal
+    await expect(route.translate({
+      text: 'hello',
+      provider: 'opencode-go',
+      model: 'deepseek-v4.1-flash',
+      targetLanguage: 'zh',
+    }, signal)).resolves.toBe('译文')
+    const firstCall = signature.mock.calls[0]?.[0] as Record<string, unknown> | undefined
+    expect(firstCall).toBeDefined()
+    expect(firstCall === undefined ? {} : 'reasoningEffort' in firstCall).toBe(false)
+  })
+})

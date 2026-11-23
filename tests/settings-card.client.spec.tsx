@@ -2,7 +2,7 @@
 
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { Context } from '@deepseek-ai/cordis'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-runtime/client'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
@@ -169,12 +169,25 @@ function cardFace(slots: SlotRegistry): SmoothStreamCardFace {
   return (entry.inject as unknown as () => SmoothStreamCardFace)()
 }
 
+/**
+ * The card header's accessible name is the dictionary title. The fork renamed
+ * it in 8446a72 ("Reasoning display enhancement", locales.ts), so the query
+ * follows the dictionary instead of the upstream literal, which had gone stale.
+ */
+const cardTitle = new RegExp(en.title, 'i')
+
 function cardProps(face: SmoothStreamCardFace): SmoothStreamCardProps {
   return {
     ...face,
     t: (key: keyof typeof en) => en[key],
     useSmoothStreamCard: (selector: (state: ReturnType<typeof face.hooks.smoothStreamCard.getSnapshot>) => unknown) => (
       selector(face.hooks.smoothStreamCard.getSnapshot())
+    ),
+    // ddfa378 unified the translation card under its own store: the renderer
+    // reads a second hook (`props.useTranslationCard`) next to the smooth
+    // stream one, so the test face must expose both, exactly as the seat does.
+    useTranslationCard: (selector: (state: ReturnType<typeof face.hooks.translationCard.getSnapshot>) => unknown) => (
+      selector(face.hooks.translationCard.getSnapshot())
     ),
   } as unknown as SmoothStreamCardProps
 }
@@ -189,7 +202,7 @@ describe('smooth-stream settings card', () => {
     await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot().status).toBe('ready'))
     expect(face.hooks.smoothStreamCard.getSnapshot().logarithmicFade).toBe(true)
     render(<SmoothStreamCard {...cardProps(face)} />)
-    fireEvent.click(screen.getByRole('button', { name: /smooth stream/i }))
+    fireEvent.click(screen.getByRole('button', { name: cardTitle }))
     fireEvent.click(screen.getByRole('checkbox', { name: /logarithmic fade/i }))
     expect(face.hooks.smoothStreamCard.getSnapshot()).toMatchObject({ logarithmicFade: false, dirty: true })
     face.save()
@@ -280,7 +293,7 @@ describe('smooth-stream settings card', () => {
     await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot().status).toBe('ready'))
     render(<SmoothStreamCard {...cardProps(face)} />)
 
-    fireEvent.click(screen.getByRole('button', { name: /smooth stream/i }))
+    fireEvent.click(screen.getByRole('button', { name: cardTitle }))
     expect(screen.getByText('Development version 0.1.0')).toBeTruthy()
     expect(screen.getByRole('button', { name: en.update }).getAttribute('disabled')).not.toBeNull()
   })
@@ -305,6 +318,8 @@ describe('smooth-stream settings card', () => {
       enabled: true,
       controlScroll: true,
       motionPreference: 'auto',
+      // ddfa378: the persisted payload carries the resolved preset too.
+      preset: 'silky',
       thinkAutoExpand: false,
       logarithmicFade: true,
     })
@@ -318,8 +333,12 @@ describe('smooth-stream settings card', () => {
     await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot().status).toBe('ready'))
     render(<SmoothStreamCard {...cardProps(face)} />)
 
-    fireEvent.click(screen.getByRole('button', { name: /smooth stream/i }))
-    const radios = screen.getAllByRole('radio')
+    fireEvent.click(screen.getByRole('button', { name: cardTitle }))
+    // ddfa378 added the translation card's own radio group to the same body,
+    // so the motion-preference assertions must scope to their group instead of
+    // counting every radio on the page (3 motion + 3 translation radios).
+    const motionGroup = screen.getByRole('radiogroup', { name: en.motionPreference })
+    const radios = within(motionGroup).getAllByRole('radio')
     expect(radios).toHaveLength(3)
     expect(radios.map(radio => (radio as HTMLInputElement).checked)).toEqual([true, false, false])
     fireEvent.click(radios[1]!)
@@ -382,6 +401,8 @@ describe('smooth-stream settings card', () => {
       enabled: false,
       controlScroll: true,
       motionPreference: 'auto',
+      // ddfa378: the persisted payload carries the resolved preset too.
+      preset: 'silky',
       thinkAutoExpand: true,
       logarithmicFade: true,
       debugEnabled: true,
@@ -486,7 +507,7 @@ describe('smooth-stream settings card', () => {
     await vi.waitFor(() => expect(face.hooks.smoothStreamCard.getSnapshot().status).toBe('ready'))
     const card = render(<SmoothStreamCard {...cardProps(face)} />)
 
-    fireEvent.click(screen.getByRole('button', { name: /smooth stream/i }))
+    fireEvent.click(screen.getByRole('button', { name: cardTitle }))
     const enabled = screen.getByRole('checkbox', { name: new RegExp(`^${en.enabled}`) })
     const thinkAutoExpand = screen.getByRole('checkbox', { name: new RegExp(`^${en.thinkAutoExpand}`) })
     expect((enabled as HTMLInputElement).checked).toBe(false)
@@ -520,22 +541,27 @@ describe('smooth-stream settings card', () => {
       enabled: false,
     }))
 
-    expect(slots.entries('conversation.chat.node').filter(entry => entry.options.priority === -100))
-      .toHaveLength(0)
-    expect(slots.entries('conversation.chat.node').find(entry => entry.options.key === 'context')?.component)
-      .toBe(BuiltInTool)
+    // 0.2.x renders every keyed entry as its own seat, so the takeover swaps the
+    // built-in assistant row's component IN PLACE (index.ts syncTakeover) and
+    // never registers a priority:-100 shadow; the shadow path only survives for
+    // compositions that declare no built-in assistant row. Assert the swap, the
+    // untouched rows while disabled, and the restore on discard/discard.
+    const entryOf = (key: string) => slots.entries('conversation.chat.node')
+      .find(entry => entry.options.key === key)
+    expect(entryOf('assistant-step')?.component).toBe(BuiltInAssistant)
+    expect(entryOf('context')?.component).toBe(BuiltInTool)
+    expect(slots.entries('conversation.chat.node').some(entry => entry.options.priority === -100))
+      .toBe(false)
 
     face.edit({ enabled: true })
+    expect(entryOf('assistant-step')?.component).not.toBe(BuiltInAssistant)
+    expect(entryOf('context')?.component).not.toBe(BuiltInTool)
     expect(slots.entries('conversation.chat.node').some(entry => entry.options.priority === -100))
-      .toBe(true)
-    expect(slots.entries('conversation.chat.node').find(entry => entry.options.key === 'context')?.component)
-      .not.toBe(BuiltInTool)
+      .toBe(false)
 
     face.discard()
-    expect(slots.entries('conversation.chat.node').filter(entry => entry.options.priority === -100))
-      .toHaveLength(0)
-    expect(slots.entries('conversation.chat.node').find(entry => entry.options.key === 'context')?.component)
-      .toBe(BuiltInTool)
+    expect(entryOf('assistant-step')?.component).toBe(BuiltInAssistant)
+    expect(entryOf('context')?.component).toBe(BuiltInTool)
   })
 
   it('does not take over before a saved disabled setting resolves or after its service unloads', async () => {
@@ -589,7 +615,7 @@ describe('smooth-stream settings card', () => {
     face.edit({ enabled: true })
     expect(face.hooks.smoothStreamCard.getSnapshot().enabled).toBe(false)
     render(<SmoothStreamCard {...cardProps(face)} />)
-    fireEvent.click(screen.getByRole('button', { name: /smooth stream/i }))
+    fireEvent.click(screen.getByRole('button', { name: cardTitle }))
 
     expect(screen.getByRole('checkbox', { name: new RegExp(`^${en.enabled}`) }).getAttribute('disabled'))
       .not.toBeNull()

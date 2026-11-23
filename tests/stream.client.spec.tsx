@@ -38,6 +38,7 @@ import {
   computeSettleDrain,
   useSmoothStreamContent,
 } from '../src/client/useSmoothStreamContent.ts'
+import { FrameCoordinator } from '../src/client/FrameCoordinator.ts'
 import { apply, inject } from '../src/client/index.ts'
 import { isFollowableChatNode, isGrowingChatNode, wrapFollowNodeView } from '../src/client/TypewriterToolNodeView.tsx'
 import { DEFAULT_STREAM_CONFIG, STREAM_BOOT_GLOBAL } from '../src/config.ts'
@@ -55,6 +56,12 @@ const FAKE = ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'req
 
 afterEach(() => {
   cleanup()
+  // The shared frame clock is a per-document singleton: a task left behind by
+  // one case (a follower, a settle watchdog, a fade scheduler) keeps running
+  // against the next case's DOM and fake clock, which made later cases fail
+  // only in whole-suite runs. `shutdown()` is the isolation hook that exists
+  // for exactly this.
+  FrameCoordinator.forDocument(document).shutdown()
   debugRuntime.resetRuntime()
   vi.useRealTimers()
   vi.unstubAllGlobals()
@@ -946,35 +953,56 @@ describe('assistant renderer', () => {
     expect(view.getByText('finished')).toBe(streamingNode)
   })
 
-  it('opens the built-in Think disclosure while reasoning streams', () => {
+  it('renders the Think row with its inline preview while reasoning streams', () => {
+    // 8446a72 replaced the built-in auto-expanded Think disclosure with a
+    // collapsed row whose inline box carries the live reasoning ("nothing
+    // auto-expands: the disclosure body below the row opens only from a click").
+    // Streaming therefore asserts the collapsed row plus that inline box, not
+    // the pre-fork aria-expanded=true state.
     const block = { kind: 'reasoning', text: 'first line\nlatest tokens' }
     const view = render(<TypewriterAssistantNodeView {...assistantProps('running', [block])} />)
     const row = view.container.querySelector('[data-disclosure-row]')
     expect(row).not.toBeNull()
-    expect(row?.getAttribute('aria-expanded')).toBe('true')
+    expect(row?.getAttribute('aria-expanded')).toBe('false')
     expect(view.container.querySelector('[data-variant="think"]')).not.toBeNull()
+    // The inline box, not the disclosure body, is where live text streams.
+    expect(view.container.querySelector('[data-follow-end]')).not.toBeNull()
     expect(view.getByText(chatZh['message.think'])).toBeTruthy()
     expect(view.container.querySelector('details')).toBeNull()
   })
 
   it('renders the dictionary-supplied title for the Think disclosure', () => {
+    // Same intent as upstream (the title is dictionary copy, never the raw key),
+    // kept against the fork's collapsed-by-default row (8446a72).
     const block = { kind: 'reasoning', text: 'first line\nlatest tokens' }
     const view = render(<TypewriterAssistantNodeView {...assistantProps('running', [block])} />)
     const row = view.container.querySelector('[data-disclosure-row]')
     expect(row).not.toBeNull()
-    expect(row?.getAttribute('aria-expanded')).toBe('true')
+    expect(row?.getAttribute('aria-expanded')).toBe('false')
     // The label comes from the dictionary, and it is NOT the raw key.
     expect(view.getByText(chatZh['message.think'])).toBeTruthy()
     expect(view.container.textContent).not.toContain('message.think')
   })
 
-  it('collapses the Think disclosure when the assistant node settles', () => {
+  it('settles the Think row into its single-line state when the assistant node settles', async () => {
+    // 8446a72: the end of a chain plays the flourish (drain → 500ms hold →
+    // constant-speed rewind) and only then shrinks the box to one line. There is
+    // no auto-expanded body to close any more, so the observable end state is
+    // the still-collapsed row plus the inline box's `data-settled` marker.
     const block = { kind: 'reasoning', text: 'first line\n\nsecond' }
     const view = render(<TypewriterAssistantNodeView {...assistantProps('running', [block])} />)
-    expect(view.container.querySelector('[data-disclosure-row]')?.getAttribute('aria-expanded')).toBe('true')
+    expect(view.container.querySelector('[data-follow-end]')).not.toBeNull()
     view.rerender(<TypewriterAssistantNodeView {...assistantProps('settled', [block])} />)
-    expect(view.getByText('first line')).toBeTruthy()
+    await act(() => vi.advanceTimersByTimeAsync(2000))
+    // `getByText('first line')` cannot match a node whose whole text is
+    // "first line\n\nsecond" (testing-library matches the full normalized
+    // text), so assert the rendered copy at container level.
+    expect(view.container.textContent).toContain('first line')
     expect(view.container.querySelector('[data-disclosure-row]')?.getAttribute('aria-expanded')).toBe('false')
+    // The inline live box is now the settled one-line box; the live-follow
+    // marker must be gone so the follower does not treat the row as growing.
+    expect(view.container.querySelector('[data-follow-end]')).toBeNull()
+    expect(view.container.querySelector('[data-settled]')).not.toBeNull()
     // The animated body stays mounted while collapsed (hidden by the 0fr
     // track), so collapse is an assertion on the wrapper state, not absence.
     expect(view.container.querySelector('[data-disclosure-content]')?.hasAttribute('data-collapsed')).toBe(true)
@@ -1048,30 +1076,38 @@ describe('assistant renderer', () => {
     })
   })
 
-  it('snaps only the auto-close body, gliding manual toggles while streaming', () => {
+  it('keeps the disclosure body gliding on manual toggles after the stream settles', () => {
+    // 8446a72 removed the stream-driven auto-close that needed a snapping body
+    // (`bodyTransition={false}`); the current row never passes it, so no state
+    // sets `data-no-transition`. The grid-track glide is the only transition and
+    // it survives both the settle commit and a manual row toggle.
     const block = { kind: 'reasoning', text: 'first line\n\nsecond' }
     const view = render(<TypewriterAssistantNodeView {...assistantProps('running', [block])} />)
-    // While the stream owns the disclosure, the body keeps its grid-track
-    // transition (manual toggle glides).
-    expect(view.container.querySelector('[data-disclosure-content]')?.hasAttribute('data-no-transition')).toBe(false)
-    // The settle auto-close snaps: the follower's spring absorbs the height
-    // step, and a grid animation on top would double-animate it.
+    const body = (): Element | null => view.container.querySelector('[data-disclosure-content]')
+    expect(body()?.hasAttribute('data-no-transition')).toBe(false)
     view.rerender(<TypewriterAssistantNodeView {...assistantProps('settled', [block])} />)
-    expect(view.container.querySelector('[data-disclosure-content]')?.hasAttribute('data-no-transition')).toBe(true)
+    expect(body()?.hasAttribute('data-no-transition')).toBe(false)
     fireEvent.click(view.container.querySelector('[data-disclosure-row]') as HTMLElement)
-    expect(view.container.querySelector('[data-disclosure-content]')?.hasAttribute('data-no-transition')).toBe(false)
+    expect(view.container.querySelector('[data-disclosure-row]')?.getAttribute('aria-expanded')).toBe('true')
+    expect(body()?.hasAttribute('data-no-transition')).toBe(false)
   })
 
-  it('collapses the Think disclosure when a later block becomes the tail', () => {
+  it('settles the Think row when a later block becomes the tail', async () => {
+    // Same intent as upstream, but the end signal moved: with the inline box
+    // (8446a72) a chain of thought ends when its block stops being the streaming
+    // tail, and the flourish lands there instead of waiting for the turn. The
+    // observable end state is the settled marker on the still-collapsed row.
     const think = { kind: 'reasoning', text: 'first line\n\nsecond' }
     const view = render(<TypewriterAssistantNodeView {...assistantProps('running', [think])} />)
-    expect(view.container.querySelector('[data-disclosure-row]')?.getAttribute('aria-expanded')).toBe('true')
+    expect(view.container.querySelector('[data-disclosure-row]')?.getAttribute('aria-expanded')).toBe('false')
     view.rerender(<TypewriterAssistantNodeView {...assistantProps('running', [
       think,
       { kind: 'text', text: 'the answer' },
     ])} />)
+    await act(() => vi.advanceTimersByTimeAsync(2000))
     expect(view.container.querySelector('[data-disclosure-row]')?.getAttribute('aria-expanded')).toBe('false')
-    expect(view.getByText('first line')).toBeTruthy()
+    expect(view.container.querySelector('[data-settled]')).not.toBeNull()
+    expect(view.container.textContent).toContain('first line')
     expect(view.container.querySelector('[data-disclosure-content]')?.hasAttribute('data-collapsed')).toBe(true)
   })
 
@@ -1180,7 +1216,9 @@ describe('assistant renderer', () => {
     port.scrollTop = 390
 
     await act(() => vi.advanceTimersByTimeAsync(80))
-    expect(view.container.querySelector('[data-disclosure-row]')?.getAttribute('aria-expanded')).toBe('true')
+    // The Think row is collapsed-by-default now (8446a72); the gap contract this
+    // case guards is about the status runway, not the body's open state.
+    expect(view.container.querySelector('[data-disclosure-row]')?.getAttribute('aria-expanded')).toBe('false')
     const naturalGap = 16
     const gaps: number[] = []
     for (let chunk = 0; chunk < 8; chunk += 1) {

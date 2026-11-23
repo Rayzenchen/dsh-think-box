@@ -1,8 +1,11 @@
-import { act, cleanup, render } from '@testing-library/react'
+import { act, cleanup, fireEvent, render } from '@testing-library/react'
 import { useRef } from 'react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { fadeTailSize, logarithmicOpacity, LogarithmicFadeController, useLogarithmicFade } from '../src/client/useLogarithmicFade.ts'
 import { TypewriterAssistantNodeView } from '../src/client/TypewriterAssistantNodeView.tsx'
+import { FrameCoordinator } from '../src/client/FrameCoordinator.ts'
+import { chatZh } from '../src/client/locales.ts'
+import type { ReasoningTranslationFace } from '../src/client/reasoningTranslation.ts'
 
 /** Custom property the fade publishes its captured ink colour through. */
 const FADE_COLOR = '--dsh-smooth-stream-fade-color'
@@ -19,6 +22,8 @@ function attach(text = '') {
   return { root, controller }
 }
 function tick(ms: number) { act(() => { vi.advanceTimersByTime(ms) }) }
+/** Let the controller's MutationObserver batch deliver (jsdom: microtask). */
+async function flush() { await act(async () => { await Promise.resolve() }) }
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['performance', 'requestAnimationFrame', 'cancelAnimationFrame', 'setTimeout', 'clearTimeout'] })
@@ -28,6 +33,10 @@ beforeEach(() => {
 })
 afterEach(() => {
   cleanup()
+  // One document-level frame clock and one highlight registry are shared by
+  // every controller in the file: a task left behind by one case paints against
+  // the next case's stubs and registry, which made outcomes order-dependent.
+  FrameCoordinator.forDocument(document).shutdown()
   for (const controller of controllers.splice(0)) controller.dispose()
   document.body.replaceChildren()
   vi.unstubAllGlobals()
@@ -65,11 +74,12 @@ it('keeps high-speed text translucent through a completion speed reset', () => {
   expect(ranges()).toHaveLength(0)
 })
 
-it('does not cut off the old tail when slowing down while appending', () => {
+it('does not cut off the old tail when slowing down while appending', async () => {
   const { root, controller } = attach('文'.repeat(48))
   controller.update(true, true, 200)
   tick(64)
   root.append('字'.repeat(10))
+  await flush()
   controller.update(true, true, 35)
   expect(ranges()).toHaveLength(58)
   tick(192)
@@ -97,11 +107,12 @@ it('keeps a 24-grapheme burst tail without changing DOM or selection text', () =
   expect(vi.getTimerCount()).toBe(0)
 })
 
-it('retains birth times through repeat commits, DOM replacement and append', () => {
+it('retains birth times through repeat commits, DOM replacement and append', async () => {
   const { root, controller } = attach('a')
   controller.update(true, true)
   tick(128)
   root.replaceChildren(document.createTextNode('ab'))
+  await flush()
   controller.update(true, true)
   controller.update(true, true)
   tick(128)
@@ -112,7 +123,7 @@ it('retains birth times through repeat commits, DOM replacement and append', () 
   expect(ranges()).toHaveLength(0)
 })
 
-it('lingers after completion and clears immediately when disabled', () => {
+it('lingers after completion, then clears; settled history never fades', () => {
   const { controller } = attach('hello')
   controller.update(true, true)
   tick(64)
@@ -120,9 +131,9 @@ it('lingers after completion and clears immediately when disabled', () => {
   expect(ranges()).toHaveLength(5)
   tick(192)
   expect(ranges()).toHaveLength(0)
-  const second = attach('world')
-  second.controller.update(true, true)
-  second.controller.update(false, false)
+
+  const history = attach('already readable')
+  history.controller.update(true, false)
   expect(ranges()).toHaveLength(0)
   expect(vi.getTimerCount()).toBe(0)
 })
@@ -131,10 +142,10 @@ it('freezes opacity while paused and resumes from the same progress', () => {
   const { controller } = attach('暂停保留透明度')
   controller.update(true, true, 100)
   tick(64)
-  const before = [...registry.entries()].filter(([, ranges]) => ranges.size > 0).map(([name]) => name)
+  const before = [...registry.entries()].filter(([, set]) => set.size > 0).map(([name]) => name)
   controller.update(true, true, 100, true)
   tick(500)
-  const frozen = [...registry.entries()].filter(([, ranges]) => ranges.size > 0).map(([name]) => name)
+  const frozen = [...registry.entries()].filter(([, set]) => set.size > 0).map(([name]) => name)
   expect(frozen).toEqual(before)
   expect(ranges().length).toBeGreaterThan(0)
   controller.update(true, true, 100, false)
@@ -142,18 +153,22 @@ it('freezes opacity while paused and resumes from the same progress', () => {
   expect(ranges()).toHaveLength(0)
 })
 
-it('does not replay replacement, history or content revealed while disabled', () => {
+it('does not replay replacement or restored history, and only fades new text', async () => {
   const { root, controller } = attach('history')
   controller.update(true, false)
   expect(ranges()).toHaveLength(0)
   root.textContent = 'replacement'
+  await flush()
   controller.update(true, true)
   expect(ranges()).toHaveLength(0)
   root.textContent += '!'
+  await flush()
   controller.update(true, true)
   expect(ranges().map(range => range.toString())).toEqual(['!'])
+
   controller.update(false, true)
   root.textContent += '?'
+  await flush()
   controller.update(false, true)
   controller.update(true, true)
   expect(ranges()).toHaveLength(0)
@@ -203,7 +218,7 @@ it('re-derives exclusion when a Text node is moved into an excluded ancestor', a
   // still-fading 'a' is dropped and the new 'b' never enters the fade.
   code.append(text)
   text.data = 'ab'
-  await vi.advanceTimersByTimeAsync(0)
+  await flush()
   controller.update(true, true, 200)
   expect(ranges()).toHaveLength(0)
 })
@@ -223,7 +238,7 @@ it('re-derives exclusion when an ancestor stops being hidden', async () => {
   // though the Text node itself only grew by one character.
   span.removeAttribute('hidden')
   text.data = 'ab'
-  await vi.advanceTimersByTimeAsync(0)
+  await flush()
   controller.update(true, true, 200)
   expect(ranges().map(range => range.toString())).toEqual(['b'])
 })
@@ -238,7 +253,7 @@ it('re-reads the fade colour when the document appearance changes', async () => 
   // appearance attributes and the root resolves to a different ink.
   root.style.color = 'rgb(230, 240, 250)'
   document.documentElement.classList.add('dsh-appearance-probe')
-  await vi.advanceTimersByTimeAsync(0)
+  await flush()
   expect(root.style.getPropertyValue(FADE_COLOR)).toBe('rgb(230, 240, 250)')
 
   document.documentElement.classList.remove('dsh-appearance-probe')
@@ -261,15 +276,15 @@ it('shares one frame loop and isolates other messages and highlights', () => {
 it('restores pre-existing inline color variables when the fade finishes', () => {
   const { root, controller } = attach('abc')
   root.style.color = 'rgb(20, 40, 60)'
-  root.style.setProperty('--dsh-smooth-stream-fade-color', 'red', 'important')
+  root.style.setProperty(FADE_COLOR, 'red', 'important')
   // jsdom's CSSStyleDeclaration drops priority on custom properties; compare
   // with what this DOM actually stored rather than assuming browser support.
-  const originalPriority = root.style.getPropertyPriority('--dsh-smooth-stream-fade-color')
+  const originalPriority = root.style.getPropertyPriority(FADE_COLOR)
   controller.update(true, true)
-  expect(root.style.getPropertyValue('--dsh-smooth-stream-fade-color')).toBe('rgb(20, 40, 60)')
+  expect(root.style.getPropertyValue(FADE_COLOR)).toBe('rgb(20, 40, 60)')
   tick(256)
-  expect(root.style.getPropertyValue('--dsh-smooth-stream-fade-color')).toBe('red')
-  expect(root.style.getPropertyPriority('--dsh-smooth-stream-fade-color')).toBe(originalPriority)
+  expect(root.style.getPropertyValue(FADE_COLOR)).toBe('red')
+  expect(root.style.getPropertyPriority(FADE_COLOR)).toBe(originalPriority)
   expect(root.style.color).toBe('rgb(20, 40, 60)')
 })
 
@@ -278,7 +293,7 @@ it('observes descendant commits', async () => {
   controller.update(true, true)
   tick(256)
   root.append('b')
-  await act(async () => { await Promise.resolve() })
+  await flush()
   expect(ranges().map(range => range.toString())).toEqual(['b'])
 })
 
@@ -305,34 +320,105 @@ it('cleans hook ranges on unmount and preference changes', () => {
   expect(registry.size).toBe(0)
 })
 
-function assistantProps(blocks: unknown[], status = 'running') {
+function assistantProps(blocks: unknown[], status = 'running', extra: Record<string, unknown> = {}) {
   return {
     node: { kind: 'assistant-step', location: { kind: 'unresolved' }, data: { status, blocks, turn: 1, step: 1, time: 0 } },
     useTurnData: () => undefined,
     openFile: () => {},
     fileMentions: () => undefined,
-    t: (key: string) => key,
-    controlScroll: false,
-    motionPreference: 'force-smooth',
+    t: (key: string) => (chatZh as Record<string, string>)[key] ?? key,
+    ...extra,
   } as unknown as Parameters<typeof TypewriterAssistantNodeView>[0]
 }
 
-it.each(['text', 'reasoning'])('integrates with real %s and clears on interruption', (kind) => {
-  const blocks = [{ kind, text: '测试流式文字效果正在逐字出现。'.repeat(12) }]
-  const view = render(<TypewriterAssistantNodeView {...assistantProps(blocks)} />)
-  tick(96)
+const streamingReasoning = [{ kind: 'reasoning', text: '测试流式文字效果正在逐字出现。'.repeat(12) }]
+
+it('fades the live inline reasoning box and clears it when the block settles', async () => {
+  const view = render(<TypewriterAssistantNodeView {...assistantProps(streamingReasoning)} />)
+  for (let frame = 0; frame < 8; frame += 1) {
+    tick(16)
+    await flush()
+  }
   expect(ranges().length).toBeGreaterThan(0)
   expect(ranges().every(range => !range.startContainer.parentElement?.closest('[aria-live]'))).toBe(true)
-  view.rerender(<TypewriterAssistantNodeView {...assistantProps(blocks, 'interrupted')} />)
+
+  view.rerender(<TypewriterAssistantNodeView {...assistantProps(streamingReasoning, 'settled')} />)
+  await flush()
+  tick(256)
   expect(ranges()).toHaveLength(0)
 })
 
-it('bypasses history when the text is already settled', () => {
-  // R1a removed the fade toggle, so the only remaining bypass exercised here is
-  // restored history. Reduced-motion coverage moves to the reasoning-box suite
-  // once the renderer's new prop surface lands (R1c).
-  const blocks = [{ kind: 'text', text: '历史消息' }]
-  render(<TypewriterAssistantNodeView {...assistantProps(blocks, 'settled')} />)
+it('moves the fade to the opened reasoning body and back', async () => {
+  const view = render(<TypewriterAssistantNodeView {...assistantProps(streamingReasoning)} />)
+  tick(96)
+  await flush()
+  const row = view.container.querySelector('[data-disclosure-row]') as HTMLElement
+  fireEvent.click(row)
+  await flush()
+  tick(96)
+  await flush()
+  expect(ranges().length).toBeGreaterThan(0)
+  expect(view.container.querySelector('[data-disclosure-content]')?.hasAttribute('data-collapsed')).toBe(false)
+
+  fireEvent.click(row)
+  await flush()
+  tick(96)
+  await flush()
+  // Collapsing must not replay the body text into the inline box.
+  expect(view.container.querySelector('[data-disclosure-content]')?.hasAttribute('data-collapsed')).toBe(true)
+})
+
+it('does not replay the original when the translated feed replaces it, then fades new text', async () => {
+  const face: ReasoningTranslationFace = {
+    prepare: async () => ({ provider: 'test', model: 'm', targetLanguage: 'en', maxTextChars: 4000 }),
+    translate: async source => `translated:${source}`,
+  }
+  const props = assistantProps([{ kind: 'reasoning', text: '第一段。' }], 'running', {
+    translation: face,
+    translationLabel: 'test route',
+    autoTranslate: true,
+  })
+  const view = render(<TypewriterAssistantNodeView {...props} />)
+  tick(64)
+  await flush()
+  view.rerender(<TypewriterAssistantNodeView {...assistantProps([
+    { kind: 'reasoning', text: '第一段。\n第二段正在生成。' },
+  ], 'running', {
+    translation: face,
+    translationLabel: 'test route',
+    autoTranslate: true,
+  })} />)
+  for (let step = 0; step < 4; step += 1) {
+    tick(16)
+    await flush()
+  }
+  // Fake timers are installed in this file, so `waitFor`'s polling clock never
+  // advances; flush the promise chain deterministically instead.
+  for (let step = 0; step < 20 && !view.container.textContent?.includes('translated:'); step += 1) {
+    await flush()
+  }
+  expect(view.container.textContent).toContain('translated:')
+  // Switching to the translated feed rewrites the block text; a rewrite must
+  // not replay the already read prefix into the fade.
+  expect(ranges()).toHaveLength(0)
+
+})
+
+it('skips fade entirely under OS reduced motion', async () => {
+  vi.stubGlobal('matchMedia', () => ({
+    matches: true,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  }))
+  const view = render(<TypewriterAssistantNodeView {...assistantProps(streamingReasoning)} />)
+  await flush()
+  expect(view.container.querySelector('[class*="scope"]')).toBeNull()
+  expect(ranges()).toHaveLength(0)
+})
+
+it('does not fade restored, already settled reasoning', async () => {
+  render(<TypewriterAssistantNodeView {...assistantProps(streamingReasoning, 'settled')} />)
+  await flush()
   expect(ranges()).toHaveLength(0)
   expect(registry.size).toBe(0)
 })

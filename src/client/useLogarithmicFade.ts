@@ -269,6 +269,11 @@ export class LogarithmicFadeController {
     return scheduler === null ? null : new LogarithmicFadeController(root, scheduler)
   }
 
+  /** The element this controller currently paints fade ranges into. */
+  get target(): HTMLElement {
+    return this.root
+  }
+
   update(enabled: boolean, active: boolean, speedCps = 100, paused = false): void {
     const now = this.scheduler.window.performance.now()
     if (paused && this.pausedAt === null) this.pausedAt = now
@@ -333,7 +338,11 @@ export class LogarithmicFadeController {
     const cached = this.excludedElements.get(element)
     if (cached !== undefined && cached.parent === element.parentElement) return cached.excluded
     const parent = element.parentElement
-    const inherited = parent === null ? false : this.elementExcluded(parent)
+    // Ancestors OUTSIDE the fade root do not describe its content. The inline
+    // reasoning preview lives inside the disclosure row (`role="button"`), so
+    // inheriting that row's exclusion down to the root would switch the box's
+    // own fade off entirely. Stop the chain at the root boundary.
+    const inherited = element === this.root || parent === null ? false : this.elementExcluded(parent)
     let own = this.ownExcluded.get(element)
     if (own === undefined) {
       own = element.matches(EXCLUDED)
@@ -437,9 +446,19 @@ export class LogarithmicFadeController {
   }
 
   private rootColorSet = false
+  /** The root's own inline value/priority before the fade overwrote it. */
+  private rootColorPreserved: PreservedColor | undefined
 
   private ensureRootColor(): void {
     if (this.rootColorSet) return
+    // The box may already carry this custom property (a theme or another
+    // instance wrote it). Capturing it means finishing the fade restores that
+    // value instead of deleting it and changing the element's look.
+    this.rootColorPreserved = {
+      value: this.root.style.getPropertyValue(COLOR_PROPERTY),
+      priority: this.root.style.getPropertyPriority(COLOR_PROPERTY),
+      generation: this.colorGeneration,
+    }
     const win = this.scheduler.window
     const color = win.getComputedStyle(this.root).color || 'currentColor'
     this.root.style.setProperty(COLOR_PROPERTY, color)
@@ -448,8 +467,11 @@ export class LogarithmicFadeController {
 
   private restoreColors(): void {
     if (this.rootColorSet) {
-      this.root.style.removeProperty(COLOR_PROPERTY)
+      const preserved = this.rootColorPreserved
+      if (preserved === undefined || preserved.value === '') this.root.style.removeProperty(COLOR_PROPERTY)
+      else this.root.style.setProperty(COLOR_PROPERTY, preserved.value, preserved.priority)
       this.rootColorSet = false
+      this.rootColorPreserved = undefined
     }
     for (const [element, preserved] of this.colors) this.restoreColor(element, preserved)
     this.colors.clear()
@@ -670,6 +692,13 @@ export function useLogarithmicFade(
       return
     }
     // Settled history allocates neither observers nor highlight buckets.
+    // The visible box can change without unmounting the row (collapsed inline
+    // preview vs. the opened disclosure body). Move the controller with it so
+    // the fade always paints the surface the reader is looking at.
+    if (controller.current !== null && root !== null && controller.current.target !== root) {
+      controller.current.dispose()
+      controller.current = null
+    }
     if (controller.current === null && root !== null && active) {
       controller.current = LogarithmicFadeController.create(root)
       // Enabling midway through a message must not replay readable text.

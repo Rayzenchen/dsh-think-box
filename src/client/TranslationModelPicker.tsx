@@ -22,12 +22,8 @@ import {
   type KeyboardEvent,
 } from 'react'
 import { createPortal } from 'react-dom'
-import {
-  IconCheckOutline14,
-  IconChevronDownOutline14,
-  IconChevronRightOutline14,
-  Input,
-} from '@deepseek-ai/dsh-client-ui-primitives'
+import { Input } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconCheck, IconChevronDown, IconChevronRight } from './harnessIcons.ts'
 import type { ThinkBoxLocaleKey } from './locales.ts'
 import type {
   TranslationCatalog,
@@ -293,7 +289,7 @@ export function TranslationModelPicker({
                 <button type="button" className={css.row} onClick={() => { setPane('model') }}>
                   <span className={css.rowLabel}>{t('translationModel')}</span>
                   <span className={css.rowValue}>{summary.model}</span>
-                  <IconChevronRightOutline14 className={css.rowChevron} />
+                  <IconChevronRight className={css.rowChevron} />
                 </button>
                 {current !== undefined && efforts.length > 0 ? (
                   <button type="button" className={css.row} onClick={() => { setPane('effort') }}>
@@ -303,7 +299,7 @@ export function TranslationModelPicker({
                         ? t('translationEffortDefault')
                         : summary.effort === '' ? reasoningEffort : summary.effort}
                     </span>
-                    <IconChevronRightOutline14 className={css.rowChevron} />
+                    <IconChevronRight className={css.rowChevron} />
                   </button>
                 ) : null}
               </>
@@ -341,7 +337,7 @@ export function TranslationModelPicker({
                             <span className={css.modelDescription}>{modelRow.description}</span>
                           )}
                         </span>
-                        {selected ? <IconCheckOutline14 className={css.check} /> : null}
+                        {selected ? <IconCheck className={css.check} /> : null}
                       </button>
                     )
                   })}
@@ -360,7 +356,7 @@ export function TranslationModelPicker({
                 onClick={() => { chooseEffort(choice.id) }}
               >
                 <span className={css.modelName}>{choice.name}</span>
-                {choice.id === reasoningEffort ? <IconCheckOutline14 className={css.check} /> : null}
+                {choice.id === reasoningEffort ? <IconCheck className={css.check} /> : null}
               </button>
             ))}
           </div>
@@ -393,7 +389,7 @@ export function TranslationModelPicker({
       >
         <span className={css.label}>{t('translationRoute')}</span>
         <span className={css.value}>{summary.text}</span>
-        <IconChevronDownOutline14 className={open ? `${css.chevron} ${css.chevronOpen}` : css.chevron} />
+        <IconChevronDown className={open ? `${css.chevron} ${css.chevronOpen}` : css.chevron} />
       </button>
       {card}
     </div>

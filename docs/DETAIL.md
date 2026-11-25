@@ -1,6 +1,6 @@
 # Reasoning display enhancement
 
-![The conversation reasoning box, the Plugins-page settings card and the model-route picker shown together](preview.svg)
+![Abstract diagram: the conversation reasoning box on the left connects through a translation/route hand-off to the Plugins-page settings card and model-route picker on the right](preview.svg)
 
 The plugin does two things: **the reasoning box** and **reasoning translation**. The answer body gets no plugin effects and is rendered directly by Harness Markdown components; the built-in `assistant-step` row is swapped only to host the reasoning box.
 

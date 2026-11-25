@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "思考框、思考翻译与模型路由选择器：把模型推理放进「思考」行右侧的行内窗，默认三行、点击展开 18 行、结束回卷；可选翻译与路由选择。",
   "meta": {
-    "title": "思考框与翻译",
+    "title": "思维链显示增强",
     "description": "把模型推理放进「思考」行右侧的行内窗：默认三行、点击展开最多 18 行、结束回卷收成一行；逐字节奏与淡入固定开启，可把思考内容翻译成界面语言；翻译通道提供与输入框模型菜单一致的 provider/model/推理强度选择器。插件页始终保留这项设置卡。"
   },
   "license": "MIT",
@@ -140,6 +140,7 @@
     "@deepseek-ai/dsh-client-store": "0.1.2-alpha.3",
     "@deepseek-ai/dsh-client-ui-attachment": "0.1.0-rc.6",
     "@deepseek-ai/dsh-client-ui-conversation": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-ui-plugin-manager": "0.1.6-alpha.2",
     "@deepseek-ai/dsh-client-ui-primitives": "0.1.2-alpha.3",
     "@deepseek-ai/dsh-client-ui-settings": "0.1.0-rc.6",
     "@deepseek-ai/dsh-client-ui-settings-plugins": "0.1.0-rc.6",
@@ -154,7 +155,6 @@
     "esbuild": "^0.28.2",
     "jsdom": "^26.1.0",
     "lightningcss": "^1.30.1",
-    "playwright-core": "^1.62.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "tsdown": "^0.22.2",

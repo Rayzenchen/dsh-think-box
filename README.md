@@ -1,8 +1,8 @@
-# 思考框与翻译（@local/dsh-think-box）
+# 思维链显示增强（@local/dsh-think-box）
 
 [English](README.en.md) | 中文
 
-<p><img src="icon.svg" width="72" height="72" alt="思考框与翻译图标：一张三行思考卡，右下角是模型路由与翻译的双向箭头"></p>
+<p><img src="icon.svg" width="72" height="72" alt="思维链显示增强图标：一张三行思考卡，右下角是模型路由与翻译的双向箭头"></p>
 
 把模型的思考过程放进「思考」行右侧的**行内思考窗**，并把思考内容按需翻译成界面语言。翻译通道自带一个与输入框模型菜单一致的**模型路由选择器**（服务商 / 模型 / 推理强度）。
 
@@ -67,7 +67,7 @@ dsh plugin --profile <profile> remove @local/dsh-think-box
 
 1. **启用**：关闭后交还 Harness 内置渲染。
 2. **自动跟随思考**：思考进行中是否自动展开跟随。
-3. **翻译通道**：后端、模型路由（服务商 / 模型 / 推理强度）、目标语言、分片与超时、`autoTranslate`。
+3. **翻译通道**：后端、模型路由（服务商 / 模型 / 推理强度）、目标语言、分片上限、`autoTranslate`。`maxTokens` / `timeoutMs` 不在卡片里，只存在于 `translation.json` 种子中。
 
 `enabled` / `thinkAutoExpand` 持久化在 profile 的 `cordis.patch.yml` 条目（`id: think-box`），volatile 字段保存后即时生效、无需重启。翻译设置保存在 `~/.dsh/think-box/translation.json`；`cordis.patch.yml` 的 `translation:` 块只作首次启动种子。当前 profile 没有可写条目时，设置卡显示为只读。
 

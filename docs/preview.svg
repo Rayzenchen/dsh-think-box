@@ -17,7 +17,7 @@
   </defs>
   <rect width="640" height="420" fill="url(#pv-bg)"/>
   <text x="24" y="28" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', sans-serif" font-size="12" font-weight="600" fill="#7B8199">DeepSeek Harness · 对话</text>
-  <text x="352" y="28" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', sans-serif" font-size="12" font-weight="600" fill="#7B8199">插件页 · 思考框与翻译</text>
+  <text x="352" y="28" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', sans-serif" font-size="12" font-weight="600" fill="#7B8199">插件页 · 思维链显示增强</text>
 
   <rect x="24" y="42" width="304" height="344" rx="14" fill="#FFFFFF" stroke="#E5E9F4" filter="url(#pv-card)"/>
   <rect x="44" y="66" width="164" height="28" rx="14" fill="#EDF1FE"/>
@@ -43,7 +43,7 @@
   <rect x="373" y="67" width="10" height="1.8" rx="0.9" fill="#FFFFFF"/>
   <rect x="373" y="70.6" width="7" height="1.8" rx="0.9" fill="#FFFFFF" fill-opacity="0.8"/>
   <rect x="373" y="74.2" width="5" height="1.8" rx="0.9" fill="#FFFFFF" fill-opacity="0.6"/>
-  <text x="400" y="70" font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif" font-size="12" font-weight="600" fill="#30364D">思考框与翻译</text>
+  <text x="400" y="70" font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif" font-size="12" font-weight="600" fill="#30364D">思维链显示增强</text>
   <text x="400" y="84" font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif" font-size="9" fill="#8E93A8">3 行思考窗 · 18 行展开 · 翻译 + 模型路由</text>
 
   <rect x="368" y="100" width="232" height="108" rx="10" fill="#FAFBFE" stroke="#E9EDF7"/>

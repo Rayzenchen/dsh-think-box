@@ -1,8 +1,8 @@
-# Reasoning box and translation (@local/dsh-think-box)
+# Reasoning display enhancement (@local/dsh-think-box)
 
 English | [中文](README.md)
 
-<p><img src="icon.svg" width="72" height="72" alt="Reasoning box and translation icon: a three-line reasoning card with a two-way model-route arrow"></p>
+<p><img src="icon.svg" width="72" height="72" alt="Reasoning display enhancement icon: a three-line reasoning card with a two-way model-route arrow"></p>
 
 Puts the model's reasoning into an **inline reasoning box** beside the Think row and translates that reasoning into the UI language on demand. The translation channel includes a **model-route picker** matching the composer model menu (provider / model / reasoning effort).
 
@@ -67,7 +67,7 @@ The Plugins-page card has three parts:
 
 1. **Enable** — turning it off hands rendering back to the built-in Harness UI.
 2. **Auto-follow reasoning** — whether the box follows while reasoning streams.
-3. **Translation channel** — backend, model route (provider / model / reasoning effort), target language, chunk limits and timeout, `autoTranslate`.
+3. **Translation channel** — backend, model route (provider / model / reasoning effort), target language, fragment limit, `autoTranslate`. `maxTokens` / `timeoutMs` are not exposed by the card; they live in the `translation.json` seed.
 
 `enabled` / `thinkAutoExpand` persist in the profile `cordis.patch.yml` entry (`id: think-box`); both are volatile and apply live without a restart. Translation settings live in `~/.dsh/think-box/translation.json`; the `translation:` block in `cordis.patch.yml` only seeds the first launch. A profile without a writable entry shows the card as read-only.
 

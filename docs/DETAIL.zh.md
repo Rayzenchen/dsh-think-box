@@ -1,4 +1,4 @@
-# 思考框与翻译
+# 思维链显示增强
 
 ![对话里的思考框、插件页设置卡与模型路由选择器同时出现在同一张示意图中](preview.svg)
 
@@ -19,7 +19,7 @@
 
 ## 设置卡
 
-插件页的**设置卡始终保留**，页面由「插件说明 / 详情示意图」和这张卡组成。卡片有三项：**启用**、**自动跟随思考**、**翻译通道**（后端、模型路由、目标语言、分片与超时）。`enabled` / `thinkAutoExpand` 写在 profile 的 `cordis.patch.yml` 条目里并即时生效；翻译设置写在 `~/.dsh/think-box/translation.json`。
+插件页的**设置卡始终保留**，页面由「插件说明 / 详情示意图」和这张卡组成。卡片有三项：**启用**、**自动跟随思考**、**翻译通道**（后端、模型路由、目标语言、分片上限、自动翻译；`maxTokens` / `timeoutMs` 只在 `translation.json` 种子里）。`enabled` / `thinkAutoExpand` 写在 profile 的 `cordis.patch.yml` 条目里并即时生效；翻译设置写在 `~/.dsh/think-box/translation.json`。
 
 启用翻译意味着思考文本会发送到你选择的翻译服务或模型路由；`autoTranslate` 控制自动发送，历史块始终手动。
 

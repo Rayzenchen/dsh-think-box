@@ -1,4 +1,4 @@
-# Reasoning box and translation
+# Reasoning display enhancement
 
 ![The conversation reasoning box, the Plugins-page settings card and the model-route picker shown together](preview.svg)
 
@@ -19,7 +19,7 @@ While streaming, only finished fragments are translated and the tail stays origi
 
 ## Settings card
 
-The Plugins-page **settings card always stays in place**: the page is the plugin header/detail plus that card. It has three parts: **enable**, **auto-follow reasoning**, and the **translation channel** (backend, model route, target language, chunk limits and timeout). `enabled` / `thinkAutoExpand` persist in the profile `cordis.patch.yml` entry and apply live; translation settings persist in `~/.dsh/think-box/translation.json`.
+The Plugins-page **settings card always stays in place**: the page is the plugin header/detail plus that card. It has three parts: **enable**, **auto-follow reasoning**, and the **translation channel** (backend, model route, target language, fragment limit, auto-translate; `maxTokens` / `timeoutMs` live in the `translation.json` seed only). `enabled` / `thinkAutoExpand` persist in the profile `cordis.patch.yml` entry and apply live; translation settings persist in `~/.dsh/think-box/translation.json`.
 
 Enabling translation sends reasoning text to the selected service or model route. `autoTranslate` controls automatic sending; historical blocks stay manual.
 

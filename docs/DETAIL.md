@@ -1,38 +1,30 @@
-# 思维链显示增强
+# Reasoning box and translation
 
-本插件只做两件事：**行内思考框**与**思考翻译**。答案正文不做任何插件特效（无逐字揭示、视口跟随、滚动接管、淡入），直接由 Harness 的 Markdown 组件渲染；替换内置 `assistant-step` 行只是为了承载思考框。
+![The conversation reasoning box, the Plugins-page settings card and the model-route picker shown together](preview.svg)
 
-## 功能
+The plugin does two things: **the reasoning box** and **reasoning translation**. The answer body gets no plugin effects and is rendered directly by Harness Markdown components; the built-in `assistant-step` row is swapped only to host the reasoning box.
 
-- **行内思考窗**：推理内容显示在「思考」行右侧的多行窗，默认三行；点击该行在下方展开完整 body（最多 18 行，内容短时按内容收缩），再点收起。思考结束后回卷到开头并收成一行，每段只播一次；恢复历史不重播。
-- **节奏**：推理文本按固定 `balanced` 节奏逐字揭示，行内框跟随内容滚动；淡入固定开启，代码/公式/摘要不参与。系统「减少动效」下揭示与淡入自动跳过，文本直接呈现。
-- **思考翻译**：思考行右侧可切换「查看译文 / 查看原文」。后端二选一：官方「思考过程翻译」组合包，或任意已注册的 DSH 模型路由（约 4000 字分片）；流式期间只增量翻译已完成片段，末尾保持原文，历史块手动点击。
-- **折叠**：保留 Host 的 `turnProcess` 契约，折叠时推理隐入「已处理」摘要，查找可恢复。
+## Reasoning box
 
-## 设置入口
+Reasoning appears in an inline box beside the Think row: a three-line preview, click for the full body (up to 18 lines, shrinking for short content), click again to collapse. When thinking ends it settles back to the first line and collapses; one flourish per stream, never replayed for restored history. Reveal uses one fixed `balanced` cadence and the logarithmic fade stays on; both are skipped under OS reduced motion.
 
-- **插件页卡片**是唯一入口：启用、自动跟随思考、翻译通道。
-- `enabled` / `thinkAutoExpand` 持久化在 `~/.dsh/profiles/<profile>/cordis.patch.yml` 的 `id: think-box` 行；volatile 字段保存后即时生效，无需重启。无 writable 条目时卡片显示只读。
-- 翻译通道设置在 `~/.dsh/think-box/translation.json`；`cordis.patch.yml` 的 `translation:` 块只做首次启动种子。
+## Translation and model route
 
-## 隐私
+The Think row toggles between “Show translation” and “Show original”. Two backends:
 
-启用翻译后，思考文本会发送到你选择的翻译服务或模型路由。是否自动发送由 `autoTranslate` 决定（仓库种子开启；实际以本机 `translation.json` 当前值为准，本机当前关闭；历史块始终手动）。
+- **Official bundle**: enable the reasoning-translation bundle on the Plugins page and it chooses the service;
+- **Model route (llm)**: the translation channel offers the same picker as the composer model menu — a one-line summary (provider · model · reasoning effort), a provider-grouped model list with search, and a reasoning-effort list. Choices are staged only; the channel's Save writes them.
 
-## 兼容性
+While streaming, only finished fragments are translated and the tail stays original; historical reasoning blocks are always manual.
 
-实测 DSH `0.2.2-rc.5`。依赖非公开接缝：`assistant-step` 原地替换、0.2.x `groupPart` 双挂载、`turnProcess` 折叠、连接 RPC（含 WebServer 回退）、volatile 配置 + `configEditor`。升级 DSH 后必须回归。
+## Settings card
 
-## 已知限制
+The Plugins-page **settings card always stays in place**: the page is the plugin header/detail plus that card. It has three parts: **enable**, **auto-follow reasoning**, and the **translation channel** (backend, model route, target language, chunk limits and timeout). `enabled` / `thinkAutoExpand` persist in the profile `cordis.patch.yml` entry and apply live; translation settings persist in `~/.dsh/think-box/translation.json`.
 
-- 旧「回合结束后滚动/输入框位置异常」问题作为历史记录保留在仓库 `FIX-REPORT-2026-10-11.md`；插件不再改动正文与滚动，不再参与该路径。
-- 翻译只覆盖思考框。
-- 当前全量测试 `129/129` 通过，无 skip。
+Enabling translation sends reasoning text to the selected service or model route. `autoTranslate` controls automatic sending; historical blocks stay manual.
 
----
+## Compatibility and limits
 
-## English summary
+Tested on DSH `0.2.2-rc.5`; requires `>=0.2.2-rc.5 <0.3.0`. The plugin depends on non-public seams (in-place `assistant-step` swap, `groupPart` split, `turnProcess` fold, connection RPC, volatile config + `configEditor`); re-regress after DSH upgrades. Translation covers the reasoning box only.
 
-A reasoning-box and reasoning-translation plugin only. The answer gets no plugin effects (no reveal, follow, scroll takeover or fade) and is rendered directly by Harness Markdown components; the `assistant-step` swap exists only to host the reasoning box. The box shows a three-line inline preview, opens an 18-line body on click, and plays a one-shot settle flourish (never on restored history). Reasoning reveal uses one fixed balanced cadence; the logarithmic fade is always on and both are skipped under OS reduced motion. Translation supports the official reasoning-translation bundle or any registered DSH model route, translating finished fragments while streaming and keeping the tail in the original language.
-
-`enabled` and `thinkAutoExpand` persist in the profile entry config (`~/.dsh/profiles/<profile>/cordis.patch.yml`, `id: think-box`, volatile — applied live); translation settings persist in `~/.dsh/think-box/translation.json`. Enabling translation sends reasoning text to the selected service/route; `autoTranslate` controls automatic sending (repository seed on, effective value from the local file). Tested on DSH 0.2.2-rc.5; the plugin depends on non-public seams (assistant-step swap, `groupPart`, `turnProcess` fold, connection RPC, volatile config + `configEditor`) and must be regressed after upgrades. The suite is 129/129 green.
+The full suite is **155/155** green with no skips.

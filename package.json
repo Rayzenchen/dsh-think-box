@@ -1,15 +1,16 @@
 {
   "name": "@local/dsh-think-box",
-  "version": "1.1.0",
-  "description": "本地定制版思考显示与翻译插件：行内多行推理窗、点击展开全文、结束回卷；思考内容可选翻译。",
+  "version": "1.0.0",
+  "description": "思考框、思考翻译与模型路由选择器：把模型推理放进「思考」行右侧的行内窗，默认三行、点击展开 18 行、结束回卷；可选翻译与路由选择。",
   "meta": {
-    "title": "思维链显示增强",
-    "description": "把模型的思考过程放进「思考」行右侧的行内推理窗：默认三行、点击展开最多 18 行、结束回卷收成一行；逐字节奏与淡入固定开启，并把思考内容按需翻译成界面语言。"
+    "title": "思考框与翻译",
+    "description": "把模型推理放进「思考」行右侧的行内窗：默认三行、点击展开最多 18 行、结束回卷收成一行；逐字节奏与淡入固定开启，可把思考内容翻译成界面语言；翻译通道提供与输入框模型菜单一致的 provider/model/推理强度选择器。插件页始终保留这项设置卡。"
   },
   "license": "MIT",
   "type": "module",
   "packageManager": "pnpm@11.23.0",
   "engines": {
+    "dsh": ">=0.2.2-rc.5 <0.3.0",
     "node": "^22.19.0 || >=24.0.0"
   },
   "keywords": [
@@ -36,7 +37,8 @@
     },
     "./src/*": "./src/*",
     "./package.json": "./package.json",
-    "./locale/*.json": "./locale/*.json"
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
   },
   "files": [
     "lib/**/*.js",
@@ -49,7 +51,9 @@
     "README.en.md",
     "docs",
     "LICENSE",
-    "locale"
+    "locale",
+    "icon.svg",
+    "CHANGELOG.md"
   ],
   "dsh": {
     "bundle": {
@@ -64,7 +68,8 @@
         "@deepseek-ai/dsh-client-ui-plugin-manager",
         "@deepseek-ai/dsh-client-ui-settings",
         "@deepseek-ai/dsh-client-ui-settings-plugins"
-      ]
+      ],
+      "immediately": true
     }
   },
   "scripts": {
@@ -155,5 +160,14 @@
     "tsdown": "^0.22.2",
     "typescript": "^5.9.2",
     "vitest": "^4.1.8"
+  },
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Rayzenchen/dsh-think-box.git"
+  },
+  "homepage": "https://github.com/Rayzenchen/dsh-think-box#readme",
+  "bugs": {
+    "url": "https://github.com/Rayzenchen/dsh-think-box/issues"
   }
 }

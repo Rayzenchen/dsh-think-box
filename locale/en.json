@@ -1,7 +1,7 @@
 {
   "meta": {
-    "title": "Reasoning display enhancement",
-    "description": "Puts the model's reasoning into an inline box beside the Think row: a three-line preview, an 18-line body on click, and a settle flourish that returns to the first line; character reveal and fade are always on, with optional reasoning translation.",
+    "title": "Reasoning box and translation",
+    "description": "Puts model reasoning into an inline box beside the Think row: a three-line preview, an 18-line body on click, and a settle flourish that returns to the first line; fixed character cadence and fade stay on. Reasoning can be translated, and the translation channel offers a provider/model/reasoning-effort picker matching the composer model menu. The Plugins-page settings card stays in place.",
     "detail": "docs/DETAIL.md"
   }
 }

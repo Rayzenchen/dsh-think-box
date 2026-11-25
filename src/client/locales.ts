@@ -85,8 +85,8 @@ export type ThinkBoxLocaleKey =
 
 /** English copy. */
 export const en: Record<ThinkBoxLocaleKey, string> = {
-  title: 'Reasoning display enhancement',
-  description: 'The inline reasoning box beside the Think row. Answer text is rendered by Harness itself.',
+  title: 'Reasoning box and translation',
+  description: 'An inline reasoning box beside the Think row, optional translation, and a model-route picker for choosing the provider, model and reasoning effort. Answer text is rendered by Harness itself.',
   enabled: 'Enable the reasoning box',
   enabledHint: 'Take over the assistant row to render the inline reasoning box. Turn off to use the built-in Harness renderer.',
   thinkAutoExpand: 'Auto-follow reasoning',
@@ -128,8 +128,8 @@ export const en: Record<ThinkBoxLocaleKey, string> = {
 
 /** Simplified Chinese copy. */
 export const zh: Record<ThinkBoxLocaleKey, string> = {
-  title: '思维链显示增强',
-  description: '「思考」行右侧的行内推理窗。正文由 Harness 自身渲染，不再逐字输出。',
+  title: '思考框与翻译',
+  description: '「思考」行右侧的行内推理窗、可选的思考翻译，以及挑选服务商 / 模型 / 推理强度的模型路由选择器。正文由 Harness 自身渲染。',
   enabled: '启用思考框',
   enabledHint: '接管助手行以显示行内思考窗。关闭后交还给 Harness 内置渲染。',
   thinkAutoExpand: '自动跟随思考',

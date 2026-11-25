@@ -178,25 +178,43 @@ export function TranslationModelPicker({
     const trigger = triggerRef.current
     if (trigger === null) return
     const bounds = trigger.getBoundingClientRect()
-    const width = Math.min(Math.max(bounds.width, 320), Math.max(280, window.innerWidth - 16))
+    const availableWidth = Math.max(280, window.innerWidth - 16)
+    const width = Math.min(Math.max(bounds.width, 360), Math.min(420, availableWidth))
     const left = Math.min(Math.max(8, bounds.left), Math.max(8, window.innerWidth - width - 8))
-    const wanted = 380
-    const opensUp = bounds.bottom + 8 + wanted > window.innerHeight && bounds.top > window.innerHeight - bounds.bottom
+    // Default downward, anchored to the trigger. Only flip above when there is
+    // less than one usable row-pair below; never clamp the top to the viewport
+    // edge, which used to park the card at the top of the screen.
+    const gap = 6
+    const below = window.innerHeight - bounds.bottom - 12
+    const above = bounds.top - 12
+    const wanted = 360
+    if (below >= 180) {
+      setRect({
+        left,
+        top: bounds.bottom + gap,
+        width,
+        height: Math.min(wanted, below),
+      })
+      return
+    }
+    const height = Math.min(wanted, Math.max(0, above))
     setRect({
       left,
-      top: opensUp ? Math.max(8, bounds.top - 8 - wanted) : bounds.bottom + 6,
+      top: bounds.top - gap - height,
       width,
-      height: Math.min(wanted, Math.max(220, (opensUp ? bounds.top : window.innerHeight - bounds.bottom) - 24)),
+      height,
     })
   }, [])
 
   useLayoutEffect(() => {
     if (!open) return
     measure()
+    const frame = requestAnimationFrame(() => { measure() })
     const onScroll = (): void => { measure() }
     window.addEventListener('scroll', onScroll, true)
     window.addEventListener('resize', onScroll)
     return () => {
+      cancelAnimationFrame(frame)
       window.removeEventListener('scroll', onScroll, true)
       window.removeEventListener('resize', onScroll)
     }
@@ -309,10 +327,10 @@ export function TranslationModelPicker({
         {pane === 'model' ? (
           <div className={css.pane}>
             {modelCount > 4 ? (
-              <div className={css.search}>
+              <div className={css.searchRow}>
                 <Input
                   className={css.searchInput ?? ''}
-                  placeholder={t('translationSearchModels')}
+                  placeholder={`${t('translationSearchModels')}…`}
                   value={query}
                   onChange={(event) => { setQuery(event.target.value) }}
                 />
@@ -328,14 +346,11 @@ export function TranslationModelPicker({
                       <button
                         key={`${providerRow.id}/${modelRow.id}`}
                         type="button"
-                        className={css.modelRow}
+                        className={selected ? `${css.modelRow} ${css.modelRowSelected}` : css.modelRow}
                         onClick={() => { chooseModel(providerRow, modelRow) }}
                       >
                         <span className={css.modelText}>
                           <span className={css.modelName}>{modelRow.name}</span>
-                          {modelRow.description === undefined ? null : (
-                            <span className={css.modelDescription}>{modelRow.description}</span>
-                          )}
                         </span>
                         {selected ? <IconCheck className={css.check} /> : null}
                       </button>
@@ -352,7 +367,9 @@ export function TranslationModelPicker({
               <button
                 key={choice.id === '' ? 'default' : choice.id}
                 type="button"
-                className={css.modelRow}
+                className={choice.id === reasoningEffort
+                  ? `${css.modelRow} ${css.modelRowSelected}`
+                  : css.modelRow}
                 onClick={() => { chooseEffort(choice.id) }}
               >
                 <span className={css.modelName}>{choice.name}</span>
@@ -381,6 +398,11 @@ export function TranslationModelPicker({
             close()
             return
           }
+          // Measure from the click as well: the first frame after a page
+          // scroll can still expose stale bounds. The layout effect and the
+          // follow-up rAF measurement settle the final position.
+          measure()
+          requestAnimationFrame(() => { measure() })
           setOpen(true)
           setPane('root')
           setQuery('')

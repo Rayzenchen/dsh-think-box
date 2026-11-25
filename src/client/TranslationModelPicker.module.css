@@ -54,79 +54,91 @@
   transform: rotate(180deg);
 }
 
+/* Floating surface matching the composer's model menu: one card, no inner
+   frames, prominent elevation and a 4px inset so rows breathe. */
 .card {
   position: fixed;
   z-index: 1200;
   box-sizing: border-box;
-  overflow-y: auto;
-  padding: 6px;
-  border: 1px solid var(--dsw-alias-border-l2);
-  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 4px;
+  border: 0;
+  border-radius: var(--dsw-radius-lg);
   background: var(--dsw-alias-bg-layer-3);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+  box-shadow: var(--dsw-elevation-prominent);
+  max-height: 360px;
 }
 
 .pane {
   display: flex;
+  min-height: 0;
   flex-direction: column;
-  gap: 2px;
 }
 
 .status {
-  margin: 4px 8px;
+  margin: 6px 7px;
   color: var(--dsw-alias-label-secondary);
   font-size: 12px;
-  line-height: 1.5;
+  line-height: 18px;
 }
 
 .failure {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 2px 6px;
+  padding: 4px 7px;
 }
 
 .retry {
   margin-left: auto;
-  padding: 2px 8px;
-  border: 1px solid var(--dsw-alias-border-l2);
-  border-radius: 6px;
-  background: none;
+  padding: 4px 8px;
+  border: none;
+  border-radius: var(--dsw-radius-md);
+  background: transparent;
   color: var(--dsw-alias-label-primary);
   font: inherit;
   font-size: 12px;
   cursor: pointer;
 }
 
-.missing {
-  margin: 2px 8px 6px;
-  color: var(--dsw-alias-label-secondary);
-  font-size: 12px;
+.retry:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
 }
 
+.missing {
+  margin: 4px 7px 6px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+/* Root cells use the same flat 14px rhythm as the list rows. */
 .row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   width: 100%;
-  padding: 6px 8px;
+  min-height: 34px;
+  padding: 5px 7px;
   border: none;
-  border-radius: 6px;
-  background: none;
+  border-radius: var(--dsw-radius-md);
+  background: transparent;
   color: var(--dsw-alias-label-primary);
   font: inherit;
-  font-size: 13px;
+  font-size: 14px;
   text-align: left;
   cursor: pointer;
 }
 
 .row:hover {
-  background: var(--dsw-alias-bg-layer-2);
+  background: var(--dsw-alias-interactive-bg-hover);
 }
 
 .rowLabel {
   flex: none;
-  color: var(--dsw-alias-label-secondary);
+  color: var(--dsw-alias-label-primary);
 }
 
 .rowValue {
@@ -135,71 +147,98 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-align: right;
+  color: var(--dsw-alias-label-tertiary);
 }
 
 .rowChevron {
   flex: none;
-  color: var(--dsw-alias-label-dimmed);
+  color: var(--dsw-alias-label-tertiary);
 }
 
-.search {
-  padding: 2px 4px 6px;
+.searchRow {
+  position: relative;
+  flex-shrink: 0;
+  margin: 2px 0 3px;
 }
 
+/* The primitive Input wrapper is a bordered 32px field by default; composer's
+   menu search is a borderless row, so strip the chrome and keep the row inset. */
 .searchInput {
+  display: flex;
   width: 100%;
+  height: auto;
+  padding: 5px 7px;
+  border: 0 solid transparent;
+  border-radius: var(--dsw-radius-md);
+  background: transparent;
+}
+
+.searchInput:focus-within {
+  border-color: transparent;
+}
+
+.searchInput input {
+  padding: 0;
+  font-size: 12px;
+  line-height: normal;
+}
+
+.searchInput input::placeholder {
+  color: var(--dsw-alias-label-caption);
 }
 
 .groups {
   display: flex;
+  min-height: 0;
   flex-direction: column;
-  gap: 4px;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .group {
   display: flex;
   flex-direction: column;
-  gap: 1px;
 }
 
 .groupHead {
   position: sticky;
   top: 0;
   z-index: 1;
-  padding: 4px 8px;
+  padding: 4px 7px;
   background: var(--dsw-alias-bg-layer-3);
-  color: var(--dsw-alias-label-secondary);
-  font-size: 11px;
+  color: var(--dsw-alias-label-caption);
+  font-size: 12px;
   font-weight: 600;
-  letter-spacing: 0.02em;
+  line-height: 18px;
 }
 
 .modelRow {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   width: 100%;
-  padding: 6px 8px;
+  min-height: 34px;
+  padding: 5px 7px;
   border: none;
-  border-radius: 6px;
-  background: none;
+  border-radius: var(--dsw-radius-md);
+  background: transparent;
   color: var(--dsw-alias-label-primary);
   font: inherit;
-  font-size: 13px;
+  font-size: 14px;
   text-align: left;
   cursor: pointer;
 }
 
-.modelRow:hover {
-  background: var(--dsw-alias-bg-layer-2);
+.modelRow:hover,
+.modelRowSelected {
+  background: var(--dsw-alias-interactive-bg-hover);
 }
 
 .modelText {
   display: flex;
   flex: 1;
   min-width: 0;
-  flex-direction: column;
-  gap: 1px;
 }
 
 .modelName {
@@ -208,17 +247,16 @@
   white-space: nowrap;
 }
 
-.modelDescription {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--dsw-alias-label-secondary);
-  font-size: 11px;
+.check {
+  display: grid;
+  flex: 0 0 14px;
+  place-items: center;
+  color: var(--dsw-alias-label-primary);
 }
 
-.check {
-  flex: none;
-  color: var(--dsw-alias-brand-primary);
+.check svg {
+  width: 14px;
+  height: 14px;
 }
 
 .bundleNotice {

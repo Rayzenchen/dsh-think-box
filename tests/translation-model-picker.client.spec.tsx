@@ -4,7 +4,11 @@ import { TranslationModelPicker } from '../src/client/TranslationModelPicker.tsx
 import { en } from '../src/client/locales.ts'
 import type { TranslationCatalog } from '../src/translation-protocol.ts'
 
-afterEach(cleanup)
+const originalInnerHeight = window.innerHeight
+afterEach(() => {
+  cleanup()
+  Object.defineProperty(window, 'innerHeight', { configurable: true, value: originalInnerHeight })
+})
 
 const t = (key: keyof typeof en): string => en[key]
 
@@ -106,7 +110,7 @@ describe('translation model picker', () => {
     fireEvent.click(screen.getByText(en.translationModel))
     expect(screen.getByText('Alpha Provider')).toBeTruthy()
     expect(screen.getByText('Beta Provider')).toBeTruthy()
-    const search = screen.getByPlaceholderText(en.translationSearchModels)
+    const search = screen.getByPlaceholderText(`${en.translationSearchModels}…`)
     fireEvent.change(search, { target: { value: 'Beta Two' } })
     expect(screen.queryByText('Model One')).toBeNull()
     fireEvent.click(screen.getByText('Beta Two'))
@@ -214,5 +218,51 @@ describe('translation model picker', () => {
     fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' })
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     expect(onSelect).not.toHaveBeenCalled()
+  })
+})
+
+
+describe('picker layout', () => {
+  it('opens below the trigger when there is room', async () => {
+    probe()
+    await waitFor(() => expect(trigger().textContent).toContain('Alpha Provider'))
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 900 })
+    trigger().getBoundingClientRect = () => ({
+      top: 300, bottom: 330, left: 100, right: 400, width: 300, height: 30, x: 100, y: 300, toJSON: () => ({}),
+    } as DOMRect)
+    fireEvent.click(trigger())
+    const dialog = await screen.findByRole('dialog')
+    await waitFor(() => expect((dialog as HTMLElement).style.top).toBe('336px'))
+    expect((dialog as HTMLElement).style.maxHeight).toBe('360px')
+    expect((dialog as HTMLElement).style.width).toBe('360px')
+  })
+
+  it('flips above the trigger when the space below is unusable, without clamping to the screen edge', async () => {
+    probe()
+    await waitFor(() => expect(trigger().textContent).toContain('Alpha Provider'))
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 700 })
+    trigger().getBoundingClientRect = () => ({
+      top: 500, bottom: 650, left: 100, right: 400, width: 300, height: 150, x: 100, y: 500, toJSON: () => ({}),
+    } as DOMRect)
+    fireEvent.click(trigger())
+    const dialog = await screen.findByRole('dialog')
+    await waitFor(() => expect((dialog as HTMLElement).style.top).toBe('134px'))
+    expect(Number.parseInt((dialog as HTMLElement).style.top, 10)).toBeLessThan(500)
+    expect((dialog as HTMLElement).style.top).not.toBe('8px')
+    expect((dialog as HTMLElement).style.maxHeight).toBe('360px')
+  })
+
+  it('derives an above-trigger top without the legacy 8px clamp', async () => {
+    probe()
+    await waitFor(() => expect(trigger().textContent).toContain('Alpha Provider'))
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 700 })
+    trigger().getBoundingClientRect = () => ({
+      top: 250, bottom: 650, left: 100, right: 400, width: 300, height: 400, x: 100, y: 250, toJSON: () => ({}),
+    } as DOMRect)
+    fireEvent.click(trigger())
+    const dialog = await screen.findByRole('dialog')
+    await waitFor(() => expect((dialog as HTMLElement).style.top).toBe('6px'))
+    expect((dialog as HTMLElement).style.top).not.toBe('8px')
+    expect(Number.parseInt((dialog as HTMLElement).style.maxHeight, 10)).toBeLessThanOrEqual(250 - 12)
   })
 })

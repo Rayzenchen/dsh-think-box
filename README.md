@@ -8,7 +8,7 @@
 
 插件只做两件事：**思考框**与**思考翻译**。答案正文不做任何插件特效——没有逐字揭示、视口跟随、滚动接管或淡入，直接由 Harness 的 Markdown 组件渲染；替换内置 `assistant-step` 行只是为了承载思考框。
 
-当前版本 **1.0.0**。思考框收起/展开两态示意图见 [`docs/preview.svg`](docs/preview.svg)，中文详情见 [`docs/DETAIL.zh.md`](docs/DETAIL.zh.md)。
+当前版本 **1.0.0**。思考框收起/展开两态示意图见 [`docs/preview.svg`](docs/preview.svg)；详情页只内嵌这张示意图，完整功能说明见下。
 
 ---
 
@@ -107,8 +107,8 @@ node scripts/check-lib-fresh.mjs
 ```
 icon.svg             插件页图标（36×36，导出为 ./icon）
 docs/preview.svg     思考框收起/展开两态抽象示意图
-docs/DETAIL.zh.md    中文详情（locale zh 的 meta.detail）
-docs/DETAIL.md       英文详情（locale en 的 meta.detail）
+docs/DETAIL.zh.md    详情页内嵌示意图（locale zh 的 meta.detail；无长文本滚动盒）
+docs/DETAIL.md       详情页内嵌示意图（locale en 的 meta.detail；无长文本滚动盒）
 src/                 Host 半边（入口、配置、设置 RPC、翻译与目录桥）
 src/client/          浏览器半边（思考框、揭示/淡入、设置卡、模型选择器）
 tests/               host/client 套件；tests/shims/ 为宿主包替身

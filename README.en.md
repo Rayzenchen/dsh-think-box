@@ -8,7 +8,7 @@ Puts the model's reasoning into an **inline reasoning box** beside the Think row
 
 The plugin does two things: **the reasoning box** and **reasoning translation**. The answer body gets no plugin effects — no per-character reveal, viewport follow, scroll takeover or fade; Harness renders it directly with its Markdown components. The built-in `assistant-step` row is swapped only to host the reasoning box.
 
-Current version **1.0.0**. The collapsed/expanded reasoning-box illustration is [`docs/preview.svg`](docs/preview.svg); the English detail doc is [`docs/DETAIL.md`](docs/DETAIL.md).
+Current version **1.0.0**. The collapsed/expanded reasoning-box illustration is [`docs/preview.svg`](docs/preview.svg); the detail page embeds that illustration only, and the full feature description is below.
 
 ---
 
@@ -107,8 +107,8 @@ node scripts/check-lib-fresh.mjs
 ```
 icon.svg             Plugins-page icon (36×36, exported as ./icon)
 docs/preview.svg     Collapsed/expanded reasoning-box abstract illustration
-docs/DETAIL.zh.md    Chinese detail (locale zh meta.detail)
-docs/DETAIL.md       English detail (locale en meta.detail)
+docs/DETAIL.zh.md    Inline detail illustration (locale zh meta.detail; no long-text scroll box)
+docs/DETAIL.md       Inline detail illustration (locale en meta.detail; no long-text scroll box)
 src/                 Host half (entry, config, settings RPC, translation/catalog bridge)
 src/client/          Browser half (box, reveal/fade, settings card, model picker)
 tests/               Host/client suites; tests/shims/ holds host-package doubles

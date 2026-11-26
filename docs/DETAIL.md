@@ -1,6 +1,6 @@
 # Reasoning display enhancement
 
-![Abstract diagram: the conversation reasoning box on the left connects through a translation/route hand-off to the Plugins-page settings card and model-route picker on the right](preview.svg)
+![Abstract diagram: the Think row and its wide inline reasoning window with the translate action on the left connect through a translation/route hand-off to the always-expanded Plugins-page settings card and model-route picker on the right](preview.svg)
 
 The plugin does two things: **the reasoning box** and **reasoning translation**. The answer body gets no plugin effects and is rendered directly by Harness Markdown components; the built-in `assistant-step` row is swapped only to host the reasoning box.
 
@@ -19,7 +19,7 @@ While streaming, only finished fragments are translated and the tail stays origi
 
 ## Settings card
 
-The Plugins-page **settings card always stays in place**: the page is the plugin header/detail plus that card. It has three parts: **enable**, **auto-follow reasoning**, and the **translation channel** (backend, model route, target language, fragment limit, auto-translate; `maxTokens` / `timeoutMs` live in the `translation.json` seed only). `enabled` / `thinkAutoExpand` persist in the profile `cordis.patch.yml` entry and apply live; translation settings persist in `~/.dsh/think-box/translation.json`.
+The Plugins-page **settings card is always expanded, no click needed**: the page is the plugin header/detail plus that card. It has three parts: **enable**, **auto-follow reasoning**, and the **translation channel** (backend, model route, target language, fragment limit, auto-translate; `maxTokens` / `timeoutMs` live in the `translation.json` seed only). `enabled` / `thinkAutoExpand` persist in the profile `cordis.patch.yml` entry and apply live; translation settings persist in `~/.dsh/think-box/translation.json`.
 
 Enabling translation sends reasoning text to the selected service or model route. `autoTranslate` controls automatic sending; historical blocks stay manual.
 

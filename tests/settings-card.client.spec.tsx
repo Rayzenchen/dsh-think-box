@@ -156,8 +156,6 @@ function cardFace(slots: SlotRegistry): ThinkBoxCardFace {
   return (entry.inject as unknown as () => ThinkBoxCardFace)()
 }
 
-const cardTitle = new RegExp(en.title, 'i')
-
 function cardProps(face: ThinkBoxCardFace): ThinkBoxCardProps {
   return {
     ...face,
@@ -195,13 +193,17 @@ async function renderCard(options: BenchOptions = {}): Promise<{
   await waitFor(() => expect(face.hooks.thinkBoxCard.getSnapshot().status)
     .toBe(options.failRead === true ? 'unavailable' : 'ready'))
   const view = render(<ThinkBoxCard {...cardProps(face)} />)
-  fireEvent.click(view.getByRole('button', { name: cardTitle }))
   return { face, view: harness.view, screen: view, bench: harness }
 }
 
 describe('reasoning settings card', () => {
-  it('renders the three sections and no removed controls', async () => {
+  it('renders every section always expanded without a disclosure control', async () => {
     const { screen } = await renderCard()
+    expect(screen.getByText(en.title)).toBeTruthy()
+    expect(screen.getByText(en.description)).toBeTruthy()
+    // Static explanation card: no header button, aria-expanded or collapsed body.
+    expect(screen.queryByRole('button', { name: new RegExp(en.title, 'i') })).toBeNull()
+    expect(screen.container.querySelector('[aria-expanded]')).toBeNull()
     expect(screen.getByText(en.enabled)).toBeTruthy()
     expect(screen.getByText(en.thinkAutoExpand)).toBeTruthy()
     expect(screen.getByText(en.translationTitle)).toBeTruthy()

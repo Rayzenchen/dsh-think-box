@@ -1,6 +1,6 @@
 # 思维链显示增强
 
-![抽象示意图：左侧对话里的思考框经中间的翻译/路由箭头，连接到右侧插件页的设置卡与模型路由选择器](preview.svg)
+![抽象示意图：左侧「思考」行与宽行内推理窗和查看译文按钮，经中间的翻译/路由箭头连接到右侧插件页的静态设置卡与模型路由选择器](preview.svg)
 
 插件只做两件事：**思考框**和**思考翻译**。答案正文不做任何插件特效，直接由 Harness 的 Markdown 组件渲染；替换内置 `assistant-step` 行只是为了承载思考框。
 
@@ -19,7 +19,7 @@
 
 ## 设置卡
 
-插件页的**设置卡始终保留**，页面由「插件说明 / 详情示意图」和这张卡组成。卡片有三项：**启用**、**自动跟随思考**、**翻译通道**（后端、模型路由、目标语言、分片上限、自动翻译；`maxTokens` / `timeoutMs` 只在 `translation.json` 种子里）。`enabled` / `thinkAutoExpand` 写在 profile 的 `cordis.patch.yml` 条目里并即时生效；翻译设置写在 `~/.dsh/think-box/translation.json`。
+插件页的**设置卡始终展开、无需点击**，页面由「插件说明 / 详情示意图」和这张卡组成。卡片有三项：**启用**、**自动跟随思考**、**翻译通道**（后端、模型路由、目标语言、分片上限、自动翻译；`maxTokens` / `timeoutMs` 只在 `translation.json` 种子里）。`enabled` / `thinkAutoExpand` 写在 profile 的 `cordis.patch.yml` 条目里并即时生效；翻译设置写在 `~/.dsh/think-box/translation.json`。
 
 启用翻译意味着思考文本会发送到你选择的翻译服务或模型路由；`autoTranslate` 控制自动发送，历史块始终手动。
 

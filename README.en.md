@@ -8,7 +8,7 @@ Puts the model's reasoning into an **inline reasoning box** beside the Think row
 
 The plugin does two things: **the reasoning box** and **reasoning translation**. The answer body gets no plugin effects — no per-character reveal, viewport follow, scroll takeover or fade; Harness renders it directly with its Markdown components. The built-in `assistant-step` row is swapped only to host the reasoning box.
 
-Current version **1.0.0**. The Plugins-page illustration is [`docs/preview.svg`](docs/preview.svg); the English detail doc is [`docs/DETAIL.md`](docs/DETAIL.md).
+Current version **1.0.0**. The Plugins-page abstract illustration is [`docs/preview.svg`](docs/preview.svg); the English detail doc is [`docs/DETAIL.md`](docs/DETAIL.md).
 
 ---
 
@@ -59,7 +59,7 @@ dsh plugin --profile <profile> remove @local/dsh-think-box
 
 The translation channel merges the old provider / model / effort fields into one summary (`provider · model · effort`). Opening it shows a card matching the composer model menu: provider-grouped models, search above four models, trailing checks, and a reasoning-effort list. **Selections are staged only** and land on disk through the channel's Save button; a failed catalog load offers Retry and never blocks saving the other fields.
 
-> The Plugins-page **settings card always stays in place**: the page is the plugin icon / title / description / detail illustration plus that card (including the model-route picker). Both are visible together.
+> The Plugins-page **settings card is always expanded, no click needed**: the page is the plugin icon / title / description / detail illustration plus that card (including the model-route picker). Both are visible together.
 
 ## Settings
 
@@ -106,7 +106,7 @@ node scripts/check-lib-fresh.mjs
 
 ```
 icon.svg             Plugins-page icon (36×36, exported as ./icon)
-docs/preview.svg     Detail illustration (box + settings card + model route)
+docs/preview.svg     Detail abstract illustration (Think row + settings card + model route)
 docs/DETAIL.zh.md    Chinese detail (locale zh meta.detail)
 docs/DETAIL.md       English detail (locale en meta.detail)
 src/                 Host half (entry, config, settings RPC, translation/catalog bridge)

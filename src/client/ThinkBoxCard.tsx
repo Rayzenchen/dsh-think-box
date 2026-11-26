@@ -4,9 +4,7 @@
  * Translation settings live in their own channel below them.
  */
 
-import { useState } from 'react'
 import type { InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
-import { IconChevronDown } from './harnessIcons.ts'
 import type { ThinkBoxCardFace, TranslationCardState } from './think-box-card-controller.ts'
 import type { TranslationConfig } from '../config.ts'
 import type { TranslationCatalog } from '../translation-protocol.ts'
@@ -26,98 +24,87 @@ export type ThinkBoxCardProps =
 /** Render the think-box card independently of the core settings namespace allowlist. */
 export function ThinkBoxCard(props: ThinkBoxCardProps) {
   const { t } = props
-  const [open, setOpen] = useState(false)
   const state = props.useThinkBoxCard(snapshot => snapshot)
   const translation = props.useTranslationCard(snapshot => snapshot)
   const blocked = !state.dirty || state.saving || state.status !== 'ready'
 
   return (
-    <li className={open ? `${css.card} ${css.cardOpen}` : css.card}>
-      <button
-        type="button"
-        className={css.header}
-        aria-expanded={open}
-        onClick={() => { setOpen(!open) }}
-      >
+    <li className={css.card}>
+      <div className={css.header}>
         <span className={css.headText}>
           <span className={css.name}>{t('title')}</span>
           <span className={css.description}>{t('description')}</span>
         </span>
         {state.dirty ? <span className={css.pending}>{t('unsaved')}</span> : null}
-        <IconChevronDown className={open ? `${css.chevron} ${css.chevronOpen}` : css.chevron} />
-      </button>
-      {open
-        ? (
-          <div className={css.body}>
-            {state.status === 'loading' ? <p className={css.readOnly} role="status">{t('loading')}</p> : null}
-            {state.status === 'unavailable' ? (
-              <div className={css.failure}>
-                <p className={css.readOnly} role="status">{t('unavailable')}</p>
-                <button type="button" className={css.discard} onClick={props.reload}>{t('retry')}</button>
-              </div>
-            ) : null}
-            {state.status === 'ready' ? (
-              <>
-                {!state.writable ? <p className={css.readOnly} role="status">{t('readOnly')}</p> : null}
-                <label className={css.field}>
-                  <span className={css.fieldHead}>
-                    <span className={css.label}>{t('enabled')}</span>
-                    <input
-                      type="checkbox"
-                      className={css.toggle}
-                      checked={state.enabled}
-                      disabled={!state.writable || state.saving}
-                      onChange={(event) => { props.edit({ enabled: event.target.checked }) }}
-                    />
-                  </span>
-                  <span className={css.hint}>{t('enabledHint')}</span>
-                </label>
-                <label className={state.enabled ? css.field : `${css.field} ${css.fieldDisabled}`}>
-                  <span className={css.fieldHead}>
-                    <span className={css.label}>{t('thinkAutoExpand')}</span>
-                    <input
-                      type="checkbox"
-                      className={css.toggle}
-                      checked={state.thinkAutoExpand}
-                      disabled={!state.writable || state.saving || !state.enabled}
-                      onChange={(event) => { props.edit({ thinkAutoExpand: event.target.checked }) }}
-                    />
-                  </span>
-                  <span className={css.hint}>{t('thinkAutoExpandHint')}</span>
-                </label>
-                <div className={css.footer}>
-                  {state.failed ? <p className={css.failed} role="status">{t('saveFailed')}</p> : null}
-                  <button
-                    type="button"
-                    className={css.discard}
-                    disabled={!state.dirty || state.saving}
-                    onClick={props.discard}
-                  >
-                    {t('discard')}
-                  </button>
-                  <button
-                    type="button"
-                    className={css.save}
-                    disabled={blocked}
-                    onClick={props.save}
-                  >
-                    {t(state.saving ? 'saving' : 'save')}
-                  </button>
-                </div>
-              </>
-            ) : null}
-            <TranslationChannel
-              t={t}
-              translation={translation}
-              edit={props.editTranslation}
-              save={props.saveTranslation}
-              discard={props.discardTranslation}
-              reload={props.reloadTranslation}
-              loadCatalog={props.loadTranslationCatalog}
-            />
+      </div>
+      <div className={css.body}>
+        {state.status === 'loading' ? <p className={css.readOnly} role="status">{t('loading')}</p> : null}
+        {state.status === 'unavailable' ? (
+          <div className={css.failure}>
+            <p className={css.readOnly} role="status">{t('unavailable')}</p>
+            <button type="button" className={css.discard} onClick={props.reload}>{t('retry')}</button>
           </div>
-        )
-        : null}
+        ) : null}
+        {state.status === 'ready' ? (
+          <>
+            {!state.writable ? <p className={css.readOnly} role="status">{t('readOnly')}</p> : null}
+            <label className={css.field}>
+              <span className={css.fieldHead}>
+                <span className={css.label}>{t('enabled')}</span>
+                <input
+                  type="checkbox"
+                  className={css.toggle}
+                  checked={state.enabled}
+                  disabled={!state.writable || state.saving}
+                  onChange={(event) => { props.edit({ enabled: event.target.checked }) }}
+                />
+              </span>
+              <span className={css.hint}>{t('enabledHint')}</span>
+            </label>
+            <label className={state.enabled ? css.field : `${css.field} ${css.fieldDisabled}`}>
+              <span className={css.fieldHead}>
+                <span className={css.label}>{t('thinkAutoExpand')}</span>
+                <input
+                  type="checkbox"
+                  className={css.toggle}
+                  checked={state.thinkAutoExpand}
+                  disabled={!state.writable || state.saving || !state.enabled}
+                  onChange={(event) => { props.edit({ thinkAutoExpand: event.target.checked }) }}
+                />
+              </span>
+              <span className={css.hint}>{t('thinkAutoExpandHint')}</span>
+            </label>
+            <div className={css.footer}>
+              {state.failed ? <p className={css.failed} role="status">{t('saveFailed')}</p> : null}
+              <button
+                type="button"
+                className={css.discard}
+                disabled={!state.dirty || state.saving}
+                onClick={props.discard}
+              >
+                {t('discard')}
+              </button>
+              <button
+                type="button"
+                className={css.save}
+                disabled={blocked}
+                onClick={props.save}
+              >
+                {t(state.saving ? 'saving' : 'save')}
+              </button>
+            </div>
+          </>
+        ) : null}
+        <TranslationChannel
+          t={t}
+          translation={translation}
+          edit={props.editTranslation}
+          save={props.saveTranslation}
+          discard={props.discardTranslation}
+          reload={props.reloadTranslation}
+          loadCatalog={props.loadTranslationCatalog}
+        />
+      </div>
     </li>
   )
 }

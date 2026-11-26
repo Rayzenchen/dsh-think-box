@@ -1,6 +1,6 @@
 # Reasoning display enhancement
 
-![Abstract diagram: the Think row and its wide inline reasoning window with the translate action on the left connect through a translation/route hand-off to the always-expanded Plugins-page settings card and model-route picker on the right](preview.svg)
+![Abstract diagram: the collapsed reasoning box on the left (Think entry, wide inline reasoning window, translate action) and the expanded reasoning box on the right (chevron, body content and scrollbar)](preview.svg)
 
 The plugin does two things: **the reasoning box** and **reasoning translation**. The answer body gets no plugin effects and is rendered directly by Harness Markdown components; the built-in `assistant-step` row is swapped only to host the reasoning box.
 

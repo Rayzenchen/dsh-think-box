@@ -8,7 +8,7 @@
 
 插件只做两件事：**思考框**与**思考翻译**。答案正文不做任何插件特效——没有逐字揭示、视口跟随、滚动接管或淡入，直接由 Harness 的 Markdown 组件渲染；替换内置 `assistant-step` 行只是为了承载思考框。
 
-当前版本 **1.0.0**。插件页详情抽象示意图见 [`docs/preview.svg`](docs/preview.svg)，中文详情见 [`docs/DETAIL.zh.md`](docs/DETAIL.zh.md)。
+当前版本 **1.0.0**。思考框收起/展开两态示意图见 [`docs/preview.svg`](docs/preview.svg)，中文详情见 [`docs/DETAIL.zh.md`](docs/DETAIL.zh.md)。
 
 ---
 
@@ -59,7 +59,7 @@ dsh plugin --profile <profile> remove @local/dsh-think-box
 
 翻译通道把原来的「服务路由 / 模型 / 推理强度」三栏合并成一行摘要（`服务商 · 模型 · 推理强度`）。点开后是与输入框模型菜单内容一致的卡片：按服务商分组的模型列表、超过四个模型时的搜索、右侧勾选，以及推理强度列表。**选择只暂存，点翻译通道的保存按钮才落盘**；加载失败可重试，也不阻塞其它字段保存。
 
-> 插件页的**设置卡始终展开，无需点击**：页面 = 插件图标 / 标题 / 描述 / 详情示意图 + 这张设置卡（含模型路由选择器），两者都会出现。
+> 示意图只画**思考框收起 / 展开两态**，不包含设置卡；插件页上的**设置卡仍始终展开、无需点击**（含模型路由选择器）。
 
 ## 设置
 
@@ -106,7 +106,7 @@ node scripts/check-lib-fresh.mjs
 
 ```
 icon.svg             插件页图标（36×36，导出为 ./icon）
-docs/preview.svg     插件页详情抽象示意图（Think 行 + 设置卡 + 模型路由）
+docs/preview.svg     思考框收起/展开两态抽象示意图
 docs/DETAIL.zh.md    中文详情（locale zh 的 meta.detail）
 docs/DETAIL.md       英文详情（locale en 的 meta.detail）
 src/                 Host 半边（入口、配置、设置 RPC、翻译与目录桥）

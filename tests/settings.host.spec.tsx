@@ -92,7 +92,7 @@ function ref<T>(value: T): Volatile<T> {
  * Resolve raw profile config like the deployed Loader does: defaults filled,
  * preference fields as stable references. The pinned test dependency
  * (schemastery 3.18) predates native `.volatile()` wrapping, so the references
- * are built here; the deployed 0.2.2 host creates the identical shape.
+ * are built here; the deployed 0.2.3-alpha.2 host creates the identical shape.
  */
 function resolveConfig(raw: unknown = {}): ResolvedConfig {
   const withDefaults = Config(raw as never) as unknown as ThinkBoxConfig

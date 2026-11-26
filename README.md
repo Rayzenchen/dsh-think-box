@@ -14,7 +14,7 @@
 
 ## 安装
 
-**要求**：DeepSeek Harness `0.2.2-rc.5` 或更新（`engines.dsh` 声明 `>=0.2.2-rc.5 <0.3.0`）。
+**要求**：DeepSeek Harness `0.2.3-alpha.2` 或更新（`engines.dsh` 声明 `>=0.2.3-alpha.2 <0.3.0`）。
 
 从 GitHub 安装（`v1.0.0` 是发布标签）：
 
@@ -77,7 +77,7 @@ dsh plugin --profile <profile> remove @local/dsh-think-box
 
 ## 兼容性
 
-- **实测内核：DSH `0.2.2-rc.5`**。插件依赖若干非公开接缝，升级 DSH 后必须回归：
+- **实测内核：DSH `0.2.3-alpha.2`**。插件依赖若干非公开接缝，升级 DSH 后必须回归：
   - 0.2.x 按 entry 渲染 Chat 行，插件**原地替换内置 `assistant-step` 行**来承载思考框；
   - 同一 assistant step 会按 `groupPart` 拆成 reasoning / response 两行，插件过滤避免重复；
   - Host 的 `turnProcess` 折叠契约；

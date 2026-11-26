@@ -14,7 +14,7 @@ Current version **1.0.0**. The collapsed/expanded reasoning-box illustration is 
 
 ## Install
 
-**Requires** DeepSeek Harness `0.2.2-rc.5` or newer (`engines.dsh` declares `>=0.2.2-rc.5 <0.3.0`).
+**Requires** DeepSeek Harness `0.2.3-alpha.2` or newer (`engines.dsh` declares `>=0.2.3-alpha.2 <0.3.0`).
 
 From GitHub (`v1.0.0` is the release tag):
 
@@ -77,7 +77,7 @@ Enabling translation sends **reasoning text to the selected translation service 
 
 ## Compatibility
 
-- **Tested kernel: DSH `0.2.2-rc.5`.** The plugin relies on non-public seams; re-regress after DSH upgrades:
+- **Tested kernel: DSH `0.2.3-alpha.2`.** The plugin relies on non-public seams; re-regress after DSH upgrades:
   - 0.2.x renders keyed Chat rows per entry, so the plugin **swaps the built-in `assistant-step` row's component in place** to host the reasoning box;
   - the same assistant step is mounted as reasoning / response rows via `groupPart`; the plugin filters to avoid duplicates;
   - the Host `turnProcess` fold contract;
